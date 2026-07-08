@@ -354,7 +354,7 @@ const SceneRenderer = ({ isPreview = false, activeScene }) => {
       {/* 3. RENDERIZA NPC NORMAL (Apenas se a loja NÃO estiver ativa) */}
       {!showMap && activeScene.npc && !activeScene.shop && (
         <>
-          <div className={`absolute bottom-0 left-[2%] md:left-[5%] h-[75%] w-[50%] md:w-[40%] flex items-end justify-center pointer-events-none ${isPreview ? 'animate-none' : 'animate-fade-in-up'}`}>
+          <div className={`absolute bottom-0 left-[0%] md:left-[2%] h-[90%] w-[68%] md:w-[55%] flex items-end justify-center pointer-events-none ${isPreview ? 'animate-none' : 'animate-fade-in-up'}`}>
             <img src={activeScene.npc.fileData} alt="NPC" className="w-full h-full object-contain object-bottom drop-shadow-[0_0_40px_rgba(0,0,0,0.9)]" />
           </div>
           <div className="absolute bottom-12 right-[5%] w-[45%] z-20 pointer-events-none">
@@ -537,7 +537,7 @@ export default function App() {
       const formData = new FormData(e.target);
       const isEditing = !!modalState.data;
 
-      // Se for edição, herda os dados antigos (como IDs e secretNotes). Se for novo, gera do zero.
+      // Se for edição, herda os dados antigos (como IDs). Se for novo, gera do zero.
       const data = isEditing ? { ...modalState.data } : { id: generateId(), campaignId: activeCampaignId };
       data.name = formData.get('name');
       
@@ -573,7 +573,6 @@ export default function App() {
         data.vendorId = formData.get('vendorId');
         const itemsRaw = formData.get('itemsData') || '';
         data.items = itemsRaw.split('\n').filter(line => line.trim() !== '').map(line => {
-           // Proteção caso o nome do item também tenha hífens
            const parts = line.split('-');
            if (parts.length > 1) {
                const price = parts.pop().trim();
@@ -584,11 +583,44 @@ export default function App() {
         });
       }
 
-      // Se o usuário enviou uma nova imagem, converte-a. Se não enviou (mas está a editar), a imagem antiga é mantida pelo spread {...modalState.data}
-      const fileInput = formData.get('fileInput');
-      if (fileInput && fileInput.size > 0) {
-         const base64Data = await fileToDataUrl(fileInput);
-         data.fileData = base64Data;
+      // PROCESSAMENTO DE ARQUIVOS (Múltiplos para NPCs, Único para o resto)
+      // PROCESSAMENTO DE ARQUIVOS (Múltiplos para NPCs, Único para o resto)
+      const files = formData.getAll('fileInput').filter(f => f.size > 0);
+      
+      // Resgata as imagens que não foram apagadas no modal (apenas para NPCs)
+      let keptVariants = [];
+      if (modalState.type === 'npc' && isEditing) {
+          const variantsStr = formData.get('existingVariants');
+          if (variantsStr) keptVariants = JSON.parse(variantsStr);
+      }
+
+      if (files.length > 0) {
+         if (modalState.type === 'npc') {
+             // 1. Converte as imagens NOVAS
+             const newBase64Images = await Promise.all(files.map(f => fileToDataUrl(f)));
+             // 2. Funde as antigas (mantidas) com as novas
+             const combinedVariants = [...keptVariants, ...newBase64Images];
+             data.variants = combinedVariants;
+             data.fileData = combinedVariants[0]; // A primeira da lista final é sempre a principal
+         } else {
+             data.fileData = await fileToDataUrl(files[0]);
+         }
+      } else if (isEditing) {
+         data.fileData = modalState.data.fileData;
+         
+         if (modalState.type === 'npc') {
+             data.variants = keptVariants;
+             if (data.variants.length > 0) {
+                 data.fileData = data.variants[0]; // Se o Mestre apagou a 1ª imagem, atualiza qual é a nova "Principal"
+             }
+         }
+      }
+
+      // Trava de segurança: Se apagou TODAS as imagens do NPC e não enviou novas
+      if (modalState.type === 'npc' && (!data.variants || data.variants.length === 0)) {
+         alert("O NPC precisa de pelo menos uma imagem! Adicione uma imagem antes de guardar.");
+         setIsLoading(false);
+         return;
       }
 
       const currentData = await localDB.getItem(collectionName) || [];
@@ -597,7 +629,7 @@ export default function App() {
       if (isEditing) {
          newDataList = currentData.map(item => item.id === data.id ? data : item);
          
-         // QoL: Atualiza a tela dos jogadores em tempo real se o item editado estiver ativo!
+         // Atualiza a tela dos jogadores em tempo real se o item editado estiver em cena!
          if (modalState.type === 'shop' && activeScene.shop?.id === data.id) publishScene({ ...activeScene, shop: data });
          if (modalState.type === 'npc' && activeScene.npc?.id === data.id) publishScene({ ...activeScene, npc: data });
          if (modalState.type === 'location' && activeScene.location?.id === data.id) publishScene({ ...activeScene, location: data });
@@ -607,6 +639,7 @@ export default function App() {
       
       await localDB.setItem(collectionName, newDataList);
       
+      // Distribui para o estado visual correto
       if (collectionName === 'campaigns') { setCampaigns(newDataList); if (!isEditing) setActiveCampaignId(data.id); }
       if (collectionName === 'locations') setLocations(newDataList);
       if (collectionName === 'npcs') setNpcs(newDataList);
@@ -618,7 +651,8 @@ export default function App() {
 
     } catch (err) {
       console.error("Erro ao guardar ativo:", err);
-      alert("Erro ao guardar ficheiro. Verifique o tamanho do arquivo.");
+      // Alerta melhorado para mostrar exatamente onde o navegador quebrou
+      alert("Erro fatal ao guardar: " + err.message + "\n\n(Dica: Se o erro falar de limite de tamanho, tente usar imagens PNG/JPG mais leves!)");
     }
 
     setModalState({ isOpen: false, type: null, data: null });
@@ -794,13 +828,29 @@ export default function App() {
   
 
   const AssetModal = () => {
+    // --- NOVO: Gestão temporária das variantes (expressões) no modal ---
+    const [currentVariants, setCurrentVariants] = useState([]);
+
+    useEffect(() => {
+      if (modalState.isOpen && modalState.type === 'npc' && modalState.data?.variants) {
+        setCurrentVariants(modalState.data.variants);
+      } else if (modalState.isOpen) {
+        setCurrentVariants([]);
+      }
+    }, [modalState]);
+
+    const removeVariant = (indexToRemove) => {
+      setCurrentVariants(prev => prev.filter((_, idx) => idx !== indexToRemove));
+    };
+
     if (!modalState.isOpen) return null;
+    
     const titles = { campaign: 'Nova Campanha', location: 'Novo Cenário', npc: 'Novo NPC', track: 'Nova Música / Som', combatant: 'Adicionar à Iniciativa', handout: 'Novo Handout / Item', shop: 'Nova Loja / Mercador' };
     const isEditing = !!modalState.data;
 
     return (
       <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-        <div className="bg-slate-900 border border-slate-700 p-6 rounded-2xl w-full max-w-md shadow-2xl animate-fade-in-up">
+        <div className="bg-slate-900 border border-slate-700 p-6 rounded-2xl w-full max-w-md shadow-2xl animate-fade-in-up custom-scrollbar max-h-[90vh] overflow-y-auto">
           <div className="flex justify-between items-center mb-6">
             <h3 className="text-xl font-bold text-amber-500">{isEditing ? 'Editar Ficheiro' : titles[modalState.type]}</h3>
             <button onClick={() => setModalState({ isOpen: false, type: null, data: null })} className="text-slate-400 hover:text-white"><X className="w-6 h-6" /></button>
@@ -843,13 +893,51 @@ export default function App() {
               </>
             )}
 
-            {/* UPGRADE: A Loja agora também aceita Imagens! */}
-            {(modalState.type === 'location' || modalState.type === 'npc' || modalState.type === 'combatant' || modalState.type === 'handout' || modalState.type === 'shop') && (
+            {/* Campo ÚNICO de Upload para Cenários, Combatentes, Handouts e Lojas */}
+            {(modalState.type === 'location' || modalState.type === 'combatant' || modalState.type === 'handout' || modalState.type === 'shop') && (
               <div className="flex flex-col gap-1 border-t border-slate-800 pt-3 mt-1">
                 <label className="text-xs text-slate-400 uppercase font-bold">Upload de Imagem (PNG/JPG)</label>
                 <input type="file" name="fileInput" accept="image/*" required={!isEditing} className="text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-amber-900/30 file:text-amber-500 hover:file:bg-amber-900/50" />
                 {isEditing && <span className="text-[10px] text-emerald-500 italic mt-1">Imagem já guardada. Envie uma nova apenas se quiser substituir.</span>}
-                {modalState.type === 'npc' && <span className="text-[10px] text-slate-500 italic mt-1">Dica: Use imagens com fundo transparente (.png) para personagens.</span>}
+              </div>
+            )}
+
+            {/* UPGRADE: Campo MÚLTIPLO Exclusivo para NPCs com Galeria Editável */}
+            {modalState.type === 'npc' && (
+              <div className="flex flex-col gap-1 border-t border-slate-800 pt-3 mt-1">
+                <label className="text-xs text-slate-400 uppercase font-bold text-emerald-400">Gerir Imagens (Expressões)</label>
+                
+                {/* --- Galeria de Edição das Variantes --- */}
+                {isEditing && currentVariants.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-2 bg-slate-950 p-2 rounded-lg border border-slate-800 shadow-inner">
+                    {currentVariants.map((vImg, idx) => (
+                      <div key={idx} className="relative w-14 h-14 rounded overflow-hidden border border-slate-700 group">
+                        <img src={vImg} className="w-full h-full object-cover object-top" alt="var" />
+                        <button 
+                          type="button" 
+                          onClick={() => removeVariant(idx)} 
+                          className="absolute inset-0 bg-red-900/80 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          title="Apagar Expressão"
+                        >
+                          <Trash2 className="w-5 h-5 text-white drop-shadow-md" />
+                        </button>
+                        {idx === 0 && (
+                          <span className="absolute bottom-0 left-0 w-full text-[8px] bg-emerald-600 text-white text-center font-bold tracking-widest">PRINCIPAL</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Input Invisível para passar as imagens que sobreviveram à edição para o saveAsset */}
+                <input type="hidden" name="existingVariants" value={JSON.stringify(currentVariants)} />
+
+                <input type="file" name="fileInput" accept="image/*" multiple required={!isEditing || currentVariants.length === 0} className="text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-emerald-900/30 file:text-emerald-500 hover:file:bg-emerald-900/50" />
+                
+                <span className="text-[10px] text-slate-400 italic mt-1">
+                  Dica: Segure <kbd className="bg-slate-800 px-1 rounded">CTRL</kbd> para selecionar várias imagens de uma vez.
+                </span>
+                {isEditing && <span className="text-[10px] text-emerald-500 font-bold mt-1">As novas imagens selecionadas serão ADICIONADAS à lista acima.</span>}
               </div>
             )}
 
@@ -917,6 +1005,8 @@ export default function App() {
       </div>
     );
   };
+
+
   // --- SISTEMA DE COMBATE ---
   const activeCombatants = combatants.filter(c => c.campaignId === activeCampaignId).sort((a, b) => b.initiative - a.initiative);
 
@@ -1356,41 +1446,68 @@ export default function App() {
                     <div className="flex flex-col gap-8">
                       {/* Função interna para renderizar um card de personagem com o botão + */}
                       {(() => {
-                        const renderCharacterCard = (npc) => (
-                          <div key={npc.id} className="relative group h-40">
-                            <div onClick={() => updateSceneElement('npc', npc)} className={`cursor-pointer rounded-xl border-2 overflow-hidden bg-slate-800 w-full h-full relative ${activeScene.npc?.id === npc.id ? 'border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'border-slate-700 hover:border-slate-500'}`}>
-                              <img src={npc.image || npc.fileData} alt={npc.name} className="w-full h-full object-cover object-top opacity-70 group-hover:opacity-100 transition-opacity" />
-                              <div className="absolute bottom-0 w-full bg-gradient-to-t from-black to-transparent p-3 pt-6">
-                                <h3 className="text-white text-sm font-bold truncate drop-shadow-md">{npc.name}</h3>
+                        const renderCharacterCard = (npc) => {
+                          // Se este for o NPC ativo, mostra a imagem que está na cena (para o Mestre saber que expressão está na tela)
+                          const isNpcActive = activeScene.npc?.id === npc.id;
+                          const displayImage = isNpcActive ? activeScene.npc.fileData : npc.fileData;
+
+                          return (
+                            <div key={npc.id} className="relative group h-40">
+                              {/* Card Principal - Clicar aqui reseta para a imagem principal (Default) */}
+                              <div onClick={() => updateSceneElement('npc', { ...npc, fileData: npc.fileData })} className={`cursor-pointer rounded-xl border-2 overflow-hidden bg-slate-800 w-full h-full relative ${isNpcActive ? 'border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'border-slate-700 hover:border-slate-500'}`}>
+                                <img src={displayImage} alt={npc.name} className="w-full h-full object-cover object-top opacity-70 group-hover:opacity-100 transition-all duration-300" />
+                                <div className="absolute bottom-0 w-full bg-gradient-to-t from-black to-transparent p-3 pt-6 pb-2">
+                                  <h3 className="text-white text-sm font-bold truncate drop-shadow-md">{npc.name}</h3>
+                                </div>
+                              </div>
+                              
+                              {/* --- NOVO: Miniaturas de Variantes Visuais (Expressões) --- */}
+                              {npc.variants && npc.variants.length > 1 && (
+                                <div className="absolute bottom-1 right-2 flex gap-1 z-20">
+                                  {npc.variants.map((vImg, idx) => (
+                                    <div 
+                                      key={idx}
+                                      onClick={(e) => { 
+                                        e.stopPropagation(); 
+                                        // Ao clicar na miniatura, atualiza a cena com esta imagem exata!
+                                        updateSceneElement('npc', { ...npc, fileData: vImg }); 
+                                      }}
+                                      className={`w-5 h-5 md:w-6 md:h-6 rounded-full overflow-hidden border-2 cursor-pointer transition-transform hover:scale-125 bg-slate-900 ${isNpcActive && activeScene.npc.fileData === vImg ? 'border-amber-500 scale-110 shadow-lg' : 'border-slate-400/50 hover:border-white'}`}
+                                      title={`Expressão ${idx + 1}`}
+                                    >
+                                      <img src={vImg} className="w-full h-full object-cover object-top" alt="var" />
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Botões Flutuantes (Adicionar Combate, Editar, Excluir) */}
+                              <div className="absolute top-2 right-2 flex flex-col gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-30">
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); quickAddToCombat(npc); }} 
+                                  title="Adicionar Rápido à Iniciativa"
+                                  className="p-1.5 bg-red-600/90 text-white rounded-lg hover:bg-red-500 shadow-lg flex items-center justify-center border border-red-400/50"
+                                >
+                                  <Plus className="w-4 h-4" />
+                                </button>
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'npc', data: npc }); }} 
+                                  title="Editar Personagem"
+                                  className="p-1.5 bg-blue-900/90 text-white rounded-lg hover:bg-blue-600 shadow-lg flex items-center justify-center border border-blue-700 transition-colors"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); deleteAsset('npcs', npc.id); }} 
+                                  title="Excluir Personagem"
+                                  className="p-1.5 bg-slate-900/90 text-slate-400 rounded-lg hover:bg-slate-700 hover:text-white shadow-lg flex items-center justify-center border border-slate-700 transition-colors"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
                               </div>
                             </div>
-                            
-                            {/* Botões Flutuantes (Adicionar Combate, Editar, Excluir) */}
-                            <div className="absolute top-2 right-2 flex flex-col gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); quickAddToCombat(npc); }} 
-                                title="Adicionar Rápido à Iniciativa"
-                                className="p-1.5 bg-red-600/90 text-white rounded-lg hover:bg-red-500 shadow-lg flex items-center justify-center border border-red-400/50"
-                              >
-                                <Plus className="w-4 h-4" />
-                              </button>
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'npc', data: npc }); }} 
-                                title="Editar Personagem"
-                                className="p-1.5 bg-blue-900/90 text-white rounded-lg hover:bg-blue-600 shadow-lg flex items-center justify-center border border-blue-700 transition-colors"
-                              >
-                                <Pencil className="w-3.5 h-3.5" />
-                              </button>
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); deleteAsset('npcs', npc.id); }} 
-                                title="Excluir Personagem"
-                                className="p-1.5 bg-slate-900/90 text-slate-400 rounded-lg hover:bg-slate-700 hover:text-white shadow-lg flex items-center justify-center border border-slate-700 transition-colors"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        );
+                          );
+                        };
 
                         const playersList = activeNpcs.filter(n => n.type === 'player');
                         const enemiesList = activeNpcs.filter(n => n.type === 'enemy');
