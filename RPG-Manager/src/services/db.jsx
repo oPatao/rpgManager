@@ -16,6 +16,25 @@ const initDB = () => {
   });
 };
 
+const urlCache = new WeakMap();
+
+export const getAssetUrl = (fileData) => {
+  if (!fileData) return null;
+  // Compatibilidade com ficheiros antigos que já estavam salvos em Base64
+  if (typeof fileData === 'string') return fileData; 
+  
+  if (fileData instanceof Blob || fileData instanceof File) {
+    // Se já criamos uma URL para este arquivo, reaproveita
+    if (urlCache.has(fileData)) return urlCache.get(fileData);
+    
+    // Cria um link temporário direto na memória RAM do navegador
+    const url = URL.createObjectURL(fileData);
+    urlCache.set(fileData, url);
+    return url;
+  }
+  return null;
+};
+
 export const localDB = {
   getItem: async (key) => {
     try {
@@ -52,7 +71,21 @@ export const getAllDataForBackup = async () => {
   const keys = ['campaigns', 'locations', 'npcs', 'tracks', 'rpg-active-scene', 'combatants', 'combat-state', 'cutscenes', 'handouts', 'shops'];
   const backup = {};
   for (const key of keys) {
-    backup[key] = await localDB.getItem(key) || [];
+    const items = await localDB.getItem(key) || [];
+    
+    // Se for um array de itens, converte os Blobs temporariamente para Base64 para caber no JSON
+    if (Array.isArray(items)) {
+       backup[key] = await Promise.all(items.map(async (item) => {
+          const processed = { ...item };
+          if (processed.fileData instanceof Blob) processed.fileData = await fileToDataUrl(processed.fileData);
+          if (processed.variants) {
+             processed.variants = await Promise.all(processed.variants.map(v => v instanceof Blob ? fileToDataUrl(v) : v));
+          }
+          return processed;
+       }));
+    } else {
+       backup[key] = items;
+    }
   }
   return backup;
 };

@@ -1,5 +1,6 @@
 // src/components/AmbientManager.jsx
 import React, { useEffect, useRef } from 'react';
+import { getAssetUrl } from '../services/db';
 
 export const AmbientManager = ({ ambientState, tracksList }) => {
   const player = useRef(null);
@@ -42,12 +43,13 @@ export const AmbientManager = ({ ambientState, tracksList }) => {
 
     const trackInfo = tracksRef.current.find(t => t.id === ambientState.trackId);
     if (trackInfo) {
-      if (player.current.src === trackInfo.fileData && !player.current.paused) {
+      if (player.current.src === getAssetUrl(trackInfo.fileData) && !player.current.paused) {
         player.current.loop = ambientState.loop;
         return;
       }
 
-      player.current.src = trackInfo.fileData;
+      player.current.src = getAssetUrl(trackInfo.fileData); // <-- ALTERADO AQUI
+
       player.current.loop = ambientState.loop;
       player.current.volume = ambientState.volume !== undefined ? ambientState.volume : 0.6; 
       player.current.play().catch(e => console.log("Autoplay ambiente bloqueado.", e));

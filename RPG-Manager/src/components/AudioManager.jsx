@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { getAssetUrl } from '../services/db';
 
 export const formatTime = (timeInSeconds) => {
   if (!timeInSeconds || isNaN(timeInSeconds)) return "0:00";
@@ -83,7 +84,7 @@ export const AudioManager = ({ audioState, setAudioProgress, tracksList }) => {
 
     const trackInfo = tracksRef.current.find(t => t.id === audioState.trackId);
     if (trackInfo) {
-      next.src = trackInfo.fileData;
+      next.src = getAssetUrl(trackInfo.fileData);
       next.loop = audioState.loop;
       next.volume = 0;
       

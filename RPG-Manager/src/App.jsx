@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Monitor, Users, Map, User, EyeOff, Eye, Music, Play, Square, Repeat, FastForward, Clock, Plus, Trash2, Folder, X, Save, Upload, Wind, FileText, Store, Pencil } from 'lucide-react';
 
-import { localDB, getAllDataForBackup, importBackup, generateId, fileToDataUrl } from './services/db';
+// IMPORTAÇÃO CORRIGIDA: getAssetUrl adicionado!
+import { localDB, getAllDataForBackup, importBackup, generateId, fileToDataUrl, getAssetUrl } from './services/db';
 import { AudioManager, formatTime } from './components/AudioManager';
 import { AmbientManager } from './components/AmbientManager';
 import { SceneRenderer } from './components/SceneRenderer';
@@ -115,7 +116,6 @@ export default function App() {
       try {
         const content = JSON.parse(e.target.result);
         
-        // Validação simples para ver se o JSON tem a estrutura correta
         if (!content.campaigns && !content.locations) {
           alert("Arquivo de backup inválido.");
           return;
@@ -178,7 +178,6 @@ export default function App() {
 
   const setTurn = (combatant) => {
     updateCombatState({ ...combatState, activeId: combatant.id });
-    // Injeta o combatente como NPC na tela principal para todos verem!
     updateSceneElement('npc', {
       id: combatant.id,
       name: combatant.name,
@@ -207,7 +206,7 @@ export default function App() {
     if(!window.confirm("Limpar toda a iniciativa atual?")) return;
     const filtered = combatants.filter(c => c.campaignId !== activeCampaignId);
     
-    updateCollection('combatants', filtered); // Usa o Zustand!
+    updateCollection('combatants', filtered);
     await localDB.setItem('combatants', filtered);
     updateCombatState({ round: 1, activeId: null });
     updateSceneElement('npc', null);
@@ -233,14 +232,14 @@ export default function App() {
     };
 
     const updatedCombatants = [...combatants, newCombatant];
-    updateCollection('combatants', updatedCombatants); // Usa o Zustand!
+    updateCollection('combatants', updatedCombatants);
     await localDB.setItem('combatants', updatedCombatants);
   };
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 flex flex-col h-screen overflow-hidden">
       <AudioManager audioState={activeScene.audio} setAudioProgress={setAudioProgress} tracksList={tracks} />
-      <AmbientManager ambientState={activeScene.ambient} tracksList={tracks} /> {/* <-- ADICIONADO */}
+      <AmbientManager ambientState={activeScene.ambient} tracksList={tracks} />
       <AssetModal />
       
 
@@ -324,7 +323,6 @@ export default function App() {
                         </span>
                       </div>
                       <div className="flex gap-4 items-center ml-auto">
-                        {/* Slider de Volume da Trilha */}
                         <div className="flex items-center gap-2 bg-slate-950/60 px-2 py-1 rounded border border-slate-800">
                           <span className="text-[10px] text-slate-400 font-bold uppercase">Vol:</span>
                           <input type="range" min="0" max="1" step="0.05" value={activeScene.audio?.volume !== undefined ? activeScene.audio.volume : 1} onChange={handleVolumeChange} className="w-16 md:w-24 accent-purple-500 h-1 bg-slate-800 rounded appearance-none cursor-pointer" />
@@ -355,7 +353,6 @@ export default function App() {
                         </span>
                       </div>
                       <div className="flex gap-4 items-center ml-auto">
-                        {/* Slider de Volume do Ambiente */}
                         <div className="flex items-center gap-2 bg-slate-950/60 px-2 py-1 rounded border border-slate-800">
                           <span className="text-[10px] text-slate-400 font-bold uppercase">Vol:</span>
                           <input type="range" min="0" max="1" step="0.05" value={activeScene.ambient?.volume !== undefined ? activeScene.ambient.volume : 0.6} onChange={handleAmbientVolumeChange} className="w-16 md:w-24 accent-emerald-500 h-1 bg-slate-800 rounded appearance-none cursor-pointer" />
@@ -373,7 +370,6 @@ export default function App() {
 
                     {activeTracks.length === 0 && <p className="text-slate-500 text-sm italic py-2">Sem músicas ou ambientes. Faça upload de um MP3.</p>}
 
-                    {/* LISTAGEM DE CARD DE ÁUDIOS COM CORES INTELIGENTES */}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                       {activeTracks.map(track => {
                         const isPlayingTrack = activeScene.audio?.trackId === track.id;
@@ -383,7 +379,6 @@ export default function App() {
                         const trackTags = track.tags || [];
                         const hasTag = (name) => trackTags.some(t => t.toLowerCase() === name.toLowerCase());
 
-                        // Determinação de cores dinâmicas baseadas nas tags customizadas
                         let cardColorClass = 'border-slate-800 bg-slate-900/50 hover:border-slate-700';
                         if (isPlayingTrack) cardColorClass = 'border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.15)] bg-slate-900';
                         else if (isPlayingAmbient) cardColorClass = 'border-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.15)] bg-slate-900';
@@ -396,7 +391,6 @@ export default function App() {
                           <div key={track.id} className={`relative group p-3 rounded-xl border flex flex-col gap-2 transition-all ${cardColorClass}`}>
                             <div className="pr-6">
                               <span className="font-medium text-xs text-slate-200 truncate block">{track.name}</span>
-                              {/* Listagem visual das badges das tags */}
                               {trackTags.length > 0 && (
                                 <div className="flex flex-wrap gap-1 mt-1">
                                   {trackTags.map((tag, idx) => (
@@ -426,8 +420,6 @@ export default function App() {
                               </button>
                             </div>
 
-                              
-                              {/* Botões de Editar e Excluir Áudio */}
                             <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                               <button onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'track', data: track }); }} title="Editar Áudio" className="p-1.5 bg-blue-900/90 text-white rounded hover:bg-blue-600 transition-colors">
                                 <Pencil className="w-3 h-3" />
@@ -441,7 +433,6 @@ export default function App() {
                       })}
                     </div>
 
-                    {/* BARRA DE PROGRESSO DA TRILHA PRINCIPAL */}
                     {activeScene.audio?.trackId && (
                       <div className="mt-2 flex items-center gap-4 text-sm text-slate-300 bg-slate-900 p-3 rounded-xl border border-slate-800 shadow-inner">
                         <Clock className="w-4 h-4 text-slate-500" />
@@ -466,7 +457,6 @@ export default function App() {
                           <Upload className="w-3 h-3" /> Fazer Upload
                         </button>
                       </div>
-                      {/* NOVO TOGGLE: MODO PLANTA BAIXA */}
                       <label className={`flex items-center gap-2 text-sm font-bold px-3 py-1.5 rounded cursor-pointer border transition-all ${activeScene.isMapMode ? 'bg-blue-600 text-white border-blue-500 shadow-[0_0_10px_rgba(37,99,235,0.4)]' : 'bg-blue-950/30 text-blue-400 border-blue-900/50 hover:bg-blue-900/40'}`}>
                         <input 
                           type="checkbox" 
@@ -485,15 +475,16 @@ export default function App() {
                       
                       {activeLocations.map(loc => (
                         <div key={loc.id} className="relative group h-28">
+                          {/* CORREÇÃO: getAssetUrl adicionado! */}
                           <div onClick={() => updateSceneElement('location', loc)} className={`cursor-pointer rounded-xl border-2 overflow-hidden w-full h-full relative ${activeScene.location?.id === loc.id ? 'border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)]' : 'border-slate-700 hover:border-slate-500'}`}>
-                            <img src={loc.image || loc.fileData} alt={loc.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform" />
+                            <img src={getAssetUrl(loc.image || loc.fileData)} alt={loc.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform" />
                             <div className="absolute inset-0 bg-black/60 flex items-end p-2"><span className="text-white text-xs font-medium truncate">{loc.name}</span></div>
                           </div>
-                          {/* Botões de Editar e Excluir Cenário */}
-                        <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                          <button onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'location', data: loc }); }} className="p-1.5 bg-blue-900/90 text-white rounded-lg hover:bg-blue-600 shadow-lg transition-colors">
-                            <Pencil className="w-4 h-4" />
-                          </button>
+                          
+                          <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                            <button onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'location', data: loc }); }} className="p-1.5 bg-blue-900/90 text-white rounded-lg hover:bg-blue-600 shadow-lg transition-colors">
+                              <Pencil className="w-4 h-4" />
+                            </button>
                             <button onClick={(e) => { e.stopPropagation(); deleteAsset('locations', loc.id); }} className="p-1.5 bg-red-900/90 text-white rounded-lg hover:bg-red-600 shadow-lg transition-colors">
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -502,6 +493,7 @@ export default function App() {
                       ))}
                     </div>
                   </section>
+
                   {/* --- SEÇÃO LOJAS / COMÉRCIO --- */}
                   <section>
                     <div className="flex items-center justify-between border-b border-slate-700 pb-2 mb-4">
@@ -530,7 +522,8 @@ export default function App() {
                           <div key={shop.id} className="relative group h-24">
                             <div onClick={() => { const vendor = npcs.find(n => n.id === shop.vendorId); publishScene({ ...activeScene, shop: shop, npc: vendor || null }); }} 
                               className={`cursor-pointer rounded-xl border-2 overflow-hidden w-full h-full relative flex flex-col justify-end bg-slate-900 ${isShopActive ? 'border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.3)]' : 'border-slate-700 hover:border-slate-500'}`}>
-                              {shop.fileData && <img src={shop.fileData} className="absolute inset-0 w-full h-full object-cover opacity-40 group-hover:opacity-70 transition-opacity" alt={shop.name} />}
+                              {/* CORREÇÃO: getAssetUrl adicionado! */}
+                              {shop.fileData && <img src={getAssetUrl(shop.fileData)} className="absolute inset-0 w-full h-full object-cover opacity-40 group-hover:opacity-70 transition-opacity" alt={shop.name} />}
                               <div className="relative z-10 p-2 bg-gradient-to-t from-black/90 to-transparent pt-6">
                                 <span className="text-yellow-500 font-bold text-sm truncate block drop-shadow-md">{shop.name}</span>
                                 <span className="text-slate-300 text-[10px] truncate block">{shop.items.length} itens catalogados</span>
@@ -545,6 +538,7 @@ export default function App() {
                       })}
                     </div>
                   </section>
+
                   {/* --- SEÇÃO CUTSCENES (VÍDEOS) --- */}
                   <section>
                     <div className="flex items-center justify-between border-b border-slate-700 pb-2 mb-4">
@@ -573,7 +567,7 @@ export default function App() {
                             <Play className="w-8 h-8 text-white/50 group-hover:text-white transition-colors" />
                             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end p-2"><span className="text-white text-xs font-medium truncate">{video.name}</span></div>
                           </div>
-                          {/* Botões de Editar e Excluir Vídeo */}
+                          
                           <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                             <button onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'cutscene', data: video }); }} className="p-1.5 bg-blue-900/90 text-white rounded-lg hover:bg-blue-600 shadow-lg transition-colors">
                               <Pencil className="w-4 h-4" />
@@ -586,6 +580,7 @@ export default function App() {
                       ))}
                     </div>
                   </section>
+
                   {/* --- SEÇÃO ELENCO (DIVIDIDO EM JOGADORES, INIMIGOS E NPCs) --- */}
                   <section>
                     <div className="flex items-center justify-between border-b border-slate-700 pb-2 mb-6">
@@ -607,16 +602,14 @@ export default function App() {
                     </div>
                     
                     <div className="flex flex-col gap-8">
-                      {/* Função interna para renderizar um card de personagem com o botão + */}
                       {(() => {
                         const renderCharacterCard = (npc) => {
-                          // Se este for o NPC ativo, mostra a imagem que está na cena (para o Mestre saber que expressão está na tela)
+                          // CORREÇÃO: getAssetUrl adicionado!
                           const isNpcActive = activeScene.npc?.id === npc.id;
-                          const displayImage = isNpcActive ? activeScene.npc.fileData : npc.fileData;
+                          const displayImage = isNpcActive ? getAssetUrl(activeScene.npc.fileData) : getAssetUrl(npc.fileData);
 
                           return (
                             <div key={npc.id} className="relative group h-40">
-                              {/* Card Principal - Clicar aqui reseta para a imagem principal (Default) */}
                               <div onClick={() => updateSceneElement('npc', { ...npc, fileData: npc.fileData })} className={`cursor-pointer rounded-xl border-2 overflow-hidden bg-slate-800 w-full h-full relative ${isNpcActive ? 'border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'border-slate-700 hover:border-slate-500'}`}>
                                 <img src={displayImage} alt={npc.name} className="w-full h-full object-cover object-top opacity-70 group-hover:opacity-100 transition-all duration-300" />
                                 <div className="absolute bottom-0 w-full bg-gradient-to-t from-black to-transparent p-3 pt-6 pb-2">
@@ -624,7 +617,6 @@ export default function App() {
                                 </div>
                               </div>
                               
-                              {/* --- NOVO: Miniaturas de Variantes Visuais (Expressões) --- */}
                               {npc.variants && npc.variants.length > 1 && (
                                 <div className="absolute bottom-1 right-2 flex gap-1 z-20">
                                   {npc.variants.map((vImg, idx) => (
@@ -632,19 +624,18 @@ export default function App() {
                                       key={idx}
                                       onClick={(e) => { 
                                         e.stopPropagation(); 
-                                        // Ao clicar na miniatura, atualiza a cena com esta imagem exata!
                                         updateSceneElement('npc', { ...npc, fileData: vImg }); 
                                       }}
                                       className={`w-5 h-5 md:w-6 md:h-6 rounded-full overflow-hidden border-2 cursor-pointer transition-transform hover:scale-125 bg-slate-900 ${isNpcActive && activeScene.npc.fileData === vImg ? 'border-amber-500 scale-110 shadow-lg' : 'border-slate-400/50 hover:border-white'}`}
                                       title={`Expressão ${idx + 1}`}
                                     >
-                                      <img src={vImg} className="w-full h-full object-cover object-top" alt="var" />
+                                      {/* CORREÇÃO: getAssetUrl adicionado! */}
+                                      <img src={getAssetUrl(vImg)} className="w-full h-full object-cover object-top" alt="var" />
                                     </div>
                                   ))}
                                 </div>
                               )}
 
-                              {/* Botões Flutuantes (Adicionar Combate, Editar, Excluir) */}
                               <div className="absolute top-2 right-2 flex flex-col gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-30">
                                 <button 
                                   onClick={(e) => { e.stopPropagation(); quickAddToCombat(npc); }} 
@@ -678,7 +669,6 @@ export default function App() {
 
                         return (
                           <>
-                            {/* GRUPO: JOGADORES */}
                             {playersList.length > 0 && (
                               <div>
                                 <h3 className="text-xs font-bold text-blue-400 uppercase tracking-widest mb-3 border-b border-blue-900/30 pb-1 flex items-center gap-2">
@@ -690,7 +680,6 @@ export default function App() {
                               </div>
                             )}
 
-                            {/* GRUPO: INIMIGOS */}
                             {enemiesList.length > 0 && (
                               <div>
                                 <h3 className="text-xs font-bold text-red-400 uppercase tracking-widest mb-3 border-b border-red-900/30 pb-1 flex items-center gap-2">
@@ -702,7 +691,6 @@ export default function App() {
                               </div>
                             )}
 
-                            {/* GRUPO: NPCs (Sempre mostra a caixa de "Esconder NPC" aqui) */}
                             <div>
                               <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-widest mb-3 border-b border-emerald-900/30 pb-1 flex items-center gap-2">
                                 <div className="w-2 h-2 rounded-full bg-emerald-500"></div> Personagens Neutros / Aliados
@@ -720,6 +708,7 @@ export default function App() {
                       })()}
                     </div>
                   </section>
+
                   {/* --- SEÇÃO HANDOUTS (ITENS E DOCUMENTOS) --- */}
                   <section>
                     <div className="flex items-center justify-between border-b border-slate-700 pb-2 mb-4">
@@ -745,12 +734,13 @@ export default function App() {
                       {handouts.filter(h => h.campaignId === activeCampaignId).map(item => (
                         <div key={item.id} className="relative group h-32">
                           <div onClick={() => updateSceneElement('handout', item)} className={`cursor-pointer rounded-xl border-2 overflow-hidden w-full h-full relative flex items-center justify-center bg-slate-900 ${activeScene.handout?.id === item.id ? 'border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'border-slate-700 hover:border-slate-500'}`}>
-                            <img src={item.fileData} alt={item.name} className="w-full h-full object-cover opacity-50 group-hover:opacity-90 transition-opacity" />
+                            {/* CORREÇÃO: getAssetUrl adicionado! */}
+                            <img src={getAssetUrl(item.fileData)} alt={item.name} className="w-full h-full object-cover opacity-50 group-hover:opacity-90 transition-opacity" />
                             <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent flex flex-col justify-end p-3">
                               <span className="text-amber-400 text-xs font-bold truncate drop-shadow-md">{item.name}</span>
                             </div>
                           </div>
-                          {/* Botões de Editar e Excluir Handout */}
+                          
                           <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                             <button onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'handout', data: item }); }} className="p-1.5 bg-blue-900/90 text-white rounded-lg hover:bg-blue-600 shadow-lg hover:scale-110 transition-all">
                               <Pencil className="w-4 h-4" />
@@ -803,7 +793,6 @@ export default function App() {
                       ) : (
                         activeCombatants.map((combatant) => {
                           const isActive = combatState.activeId === combatant.id;
-                          // Cores baseadas no tipo
                           const typeStyles = {
                             player: "bg-blue-950/20 border-blue-900/50 text-blue-400",
                             enemy: "bg-red-950/20 border-red-900/50 text-red-400",
@@ -814,7 +803,8 @@ export default function App() {
                           return (
                             <div key={combatant.id} className={`flex items-center gap-4 p-2 rounded-lg border-2 transition-all group ${activeStyle}`}>
                               <div className="w-12 h-12 rounded-md overflow-hidden bg-black shrink-0 border border-slate-700">
-                                <img src={combatant.fileData} alt={combatant.name} className="w-full h-full object-cover object-top opacity-90 group-hover:opacity-100" />
+                                {/* CORREÇÃO: getAssetUrl adicionado! */}
+                                <img src={getAssetUrl(combatant.fileData)} alt={combatant.name} className="w-full h-full object-cover object-top opacity-90 group-hover:opacity-100" />
                               </div>
                               
                               <div className="flex flex-col flex-1">
@@ -868,7 +858,7 @@ export default function App() {
                 <SceneRenderer isPreview={true} activeScene={activeScene} />
               </div>
 
-              {/* --- NOVO: BLOCO DE NOTAS SECRETO DO MESTRE --- */}
+              {/* --- BLOCO DE NOTAS SECRETO DO MESTRE --- */}
               <div className="bg-slate-900 border border-red-950 rounded-lg p-4 mb-4 flex flex-col gap-4 shadow-lg">
                 <h3 className="text-xs uppercase tracking-widest text-red-400 font-bold flex items-center gap-2 border-b border-red-950 pb-2">
                   <EyeOff className="w-3.5 h-3.5 text-red-500" /> Notas Secretas do Mestre

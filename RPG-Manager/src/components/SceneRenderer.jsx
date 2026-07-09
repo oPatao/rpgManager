@@ -1,6 +1,7 @@
 // src/components/SceneRenderer.jsx
 import React, { useState, useEffect } from 'react';
 import { Music } from 'lucide-react';
+import { getAssetUrl } from '../services/db';
 
 export const SceneRenderer = ({ isPreview = false, activeScene }) => {
   const npcName = activeScene.hideNpcName ? "????" : (activeScene.npc?.name || "");
@@ -29,7 +30,7 @@ export const SceneRenderer = ({ isPreview = false, activeScene }) => {
       {activeScene.location && (
         <div className={`absolute inset-0 transition-all duration-1000 ease-in-out ${showMap ? 'bg-contain bg-no-repeat bg-center' : 'bg-cover bg-center'}`}
              style={{ 
-               backgroundImage: `url(${activeScene.location.fileData})`, 
+               backgroundImage: `url(${getAssetUrl(activeScene.location.fileData)})`,
                filter: (activeScene.npc && !showMap) ? 'brightness(0.5) blur(2px)' : 'brightness(1)' 
              }} />
       )}
@@ -43,7 +44,7 @@ export const SceneRenderer = ({ isPreview = false, activeScene }) => {
              <div className="absolute top-0 bg-[#2c1810]/90 border-2 border-[#8b5a2b] px-8 py-3 rounded shadow-[0_4px_15px_rgba(0,0,0,0.6)] backdrop-blur-md">
                 <h2 className="text-[#e2b879] text-2xl font-serif font-bold tracking-widest uppercase">{npcName}</h2>
              </div>
-             <img src={activeScene.npc.fileData} alt="Vendor" className="w-full h-[90%] object-contain object-bottom drop-shadow-[0_0_40px_rgba(0,0,0,0.9)]" />
+             <img src={getAssetUrl(activeScene.npc.fileData)} alt="Vendor" className="w-full h-[90%] object-contain object-bottom drop-shadow-[0_0_40px_rgba(0,0,0,0.9)]" />
           </div>
 
           {/* Lado Direito: Quadro da Loja */}
@@ -52,7 +53,7 @@ export const SceneRenderer = ({ isPreview = false, activeScene }) => {
              {/* SE A LOJA TIVER IMAGEM, MOSTRA COMO BANNER NO TOPO */}
              {activeScene.shop.fileData ? (
                <div className="w-full h-32 md:h-48 relative border-b-4 border-[#4a2e1b] shrink-0">
-                  <img src={activeScene.shop.fileData} className="w-full h-full object-cover opacity-80" alt={activeScene.shop.name} />
+                  <img src={getAssetUrl(activeScene.shop.fileData)} className="w-full h-full object-cover opacity-80" alt={activeScene.shop.name} />
                   <div className="absolute inset-0 bg-gradient-to-t from-[#2c1810]/95 to-transparent flex items-end justify-center pb-4">
                       <h1 className="text-[#e2b879] text-3xl md:text-4xl font-serif font-bold uppercase tracking-widest drop-shadow-lg">{activeScene.shop.name}</h1>
                   </div>
@@ -91,8 +92,8 @@ export const SceneRenderer = ({ isPreview = false, activeScene }) => {
       {/* 3. RENDERIZA NPC NORMAL (Apenas se a loja NÃO estiver ativa) */}
       {!showMap && activeScene.npc && !activeScene.shop && (
         <>
-          <div className={`absolute bottom-0 left-[0%] md:left-[2%] h-[90%] w-[68%] md:w-[55%] flex items-end justify-center pointer-events-none ${isPreview ? 'animate-none' : 'animate-fade-in-up'}`}>
-            <img src={activeScene.npc.fileData} alt="NPC" className="w-full h-full object-contain object-bottom drop-shadow-[0_0_40px_rgba(0,0,0,0.9)]" />
+          <div className={`absolute bottom-0 left-[0%] md:left-[2%] h-[85%] w-[65%] md:w-[55%] flex items-end justify-center pointer-events-none ${isPreview ? 'animate-none' : 'animate-fade-in-up'}`}>
+            <img src={getAssetUrl(activeScene.npc.fileData)} alt="NPC" className="w-full h-full object-contain object-bottom drop-shadow-[0_0_40px_rgba(0,0,0,0.9)]" />
           </div>
           <div className="absolute bottom-12 right-[5%] w-[45%] z-20 pointer-events-none">
              <div className="bg-gradient-to-r from-black/90 to-slate-900/90 backdrop-blur-md border-t-4 border-l-4 border-amber-600 rounded-tr-3xl p-6 md:p-8 shadow-2xl pointer-events-auto">
@@ -108,10 +109,8 @@ export const SceneRenderer = ({ isPreview = false, activeScene }) => {
       {activeScene.handout && (
         <div className="absolute inset-0 z-[80] flex items-center justify-center bg-black/70 backdrop-blur-md p-4 md:p-8 animate-fade-in-up pointer-events-none">
            <div className="max-w-3xl max-h-full flex flex-col items-center gap-6 p-6 bg-slate-900 border border-amber-500/50 rounded-2xl shadow-[0_0_80px_rgba(245,158,11,0.15)] pointer-events-auto">
-              {/* Imagem do Item */}
-              <img src={activeScene.handout.fileData} alt={activeScene.handout.name} className="max-h-[50vh] object-contain drop-shadow-2xl rounded-lg" />
+              <img src={getAssetUrl(activeScene.handout.fileData)} alt={activeScene.handout.name} className="max-h-[50vh] object-contain drop-shadow-2xl rounded-lg" />
               
-              {/* Texto Opcional */}
               {activeScene.handout.desc && (
                 <div className="bg-slate-950 border border-slate-800 p-4 md:p-6 rounded-xl w-full text-center shadow-inner">
                    <p className="text-amber-100/90 text-lg md:text-xl font-serif italic whitespace-pre-wrap leading-relaxed">
@@ -123,10 +122,10 @@ export const SceneRenderer = ({ isPreview = false, activeScene }) => {
         </div>
       )}
 
-      {/* 3. PLAYER DE CUTSCENE */}
+      {/* 4. PLAYER DE CUTSCENE */}
       {activeScene.cutscene && (
         <video 
-          src={activeScene.cutscene.fileData} 
+          src={getAssetUrl(activeScene.cutscene.fileData)} 
           autoPlay 
           loop 
           playsInline

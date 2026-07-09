@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Save } from 'lucide-react';
-import { localDB, generateId, fileToDataUrl } from '../services/db';
 import { useRPGStore } from '../store/useRPGStore';
+import { localDB, generateId, fileToDataUrl, getAssetUrl } from '../services/db';
 
 export const AssetModal = () => {
   // Puxa as variáveis globais da Store do Zustand
@@ -80,19 +80,19 @@ export const AssetModal = () => {
 
       const files = formData.getAll('fileInput').filter(f => f.size > 0);
       let keptVariants = [];
+      
       if (modalState.type === 'npc' && isEditing) {
-          const variantsStr = formData.get('existingVariants');
-          if (variantsStr) keptVariants = JSON.parse(variantsStr);
+          // Lemos as imagens que sobraram direto da memória do React, sem inputs invisíveis!
+          keptVariants = currentVariants; 
       }
 
       if (files.length > 0) {
          if (modalState.type === 'npc') {
-             const newBase64Images = await Promise.all(files.map(f => fileToDataUrl(f)));
-             const combinedVariants = [...keptVariants, ...newBase64Images];
+             const combinedVariants = [...keptVariants, ...files]; // Junta os arquivos antigos com os novos
              data.variants = combinedVariants;
-             data.fileData = combinedVariants[0];
+             data.fileData = combinedVariants[0]; // Salva o File/Blob diretamente! Sem await, sem Base64!
          } else {
-             data.fileData = await fileToDataUrl(files[0]);
+             data.fileData = files[0];
          }
       } else if (isEditing) {
          data.fileData = modalState.data.fileData;
@@ -205,7 +205,7 @@ export const AssetModal = () => {
                   <div className="flex flex-wrap gap-2 mb-2 bg-slate-950 p-2 rounded-lg border border-slate-800 shadow-inner">
                     {currentVariants.map((vImg, idx) => (
                       <div key={idx} className="relative w-14 h-14 rounded overflow-hidden border border-slate-700 group">
-                        <img src={vImg} className="w-full h-full object-cover object-top" alt="var" />
+                        <img src={getAssetUrl(vImg)} className="w-full h-full object-cover object-top" alt="var" />
                         <button 
                           type="button" 
                           onClick={() => removeVariant(idx)} 
@@ -222,8 +222,6 @@ export const AssetModal = () => {
                   </div>
                 )}
 
-                {/* Input Invisível para passar as imagens que sobreviveram à edição para o saveAsset */}
-                <input type="hidden" name="existingVariants" value={JSON.stringify(currentVariants)} />
 
                 <input type="file" name="fileInput" accept="image/*" multiple required={!isEditing || currentVariants.length === 0} className="text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-emerald-900/30 file:text-emerald-500 hover:file:bg-emerald-900/50" />
                 
