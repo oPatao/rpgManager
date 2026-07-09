@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save } from 'lucide-react';
+import { X, Save, Trash2 } from 'lucide-react';
 import { useRPGStore } from '../store/useRPGStore';
 import { localDB, generateId, fileToDataUrl, getAssetUrl } from '../services/db';
 
@@ -38,6 +38,7 @@ export const AssetModal = () => {
 
       const data = isEditing ? { ...modalState.data } : { id: generateId(), campaignId: activeCampaignId };
       data.name = formData.get('name');
+      data.folder = formData.get('folder')?.trim() || '';
       
       const collectionName = modalState.type === 'campaign' ? 'campaigns' : 
                              modalState.type === 'location' ? 'locations' : 
@@ -154,6 +155,12 @@ export const AssetModal = () => {
               <label className="text-xs text-slate-400 uppercase font-bold">Nome</label>
               <input name="name" defaultValue={modalState.data?.name} required className="bg-slate-950 border border-slate-700 rounded-lg p-3 text-white" placeholder="Obrigatório..." />
             </div>
+            {(modalState.type === 'location' || modalState.type === 'npc' || modalState.type === 'cutscene' || modalState.type === 'handout') && (
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-slate-400 uppercase font-bold text-blue-400">Pasta / Categoria (Opcional)</label>
+                <input name="folder" defaultValue={modalState.data?.folder} className="bg-slate-950 border border-slate-700 rounded-lg p-3 text-white" placeholder="Ex: Floresta, Taverna, Ato 1..." />
+              </div>
+            )}
 
             {modalState.type === 'cutscene' && (
               <div className="flex flex-col gap-1 border-t border-slate-800 pt-3 mt-1">
@@ -288,8 +295,8 @@ export const AssetModal = () => {
               </>
             )}
 
-            <button type="submit" disabled={isLoading} className="mt-4 bg-amber-600 hover:bg-amber-500 text-black font-bold py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50 transition-colors">
-              <Save className="w-5 h-5" /> {isLoading ? "A Guardar..." : isEditing ? "Atualizar Ficheiro Offline" : "Guardar Ficheiro Offline"}
+            <button type="submit" disabled={isLoadingLocal} className="mt-4 bg-amber-600 hover:bg-amber-500 text-black font-bold py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50 transition-colors">
+                <Save className="w-5 h-5" /> {isLoadingLocal ? "A Guardar..." : isEditing ? "Atualizar Ficheiro Offline" : "Guardar Ficheiro Offline"}
             </button>
           </form>
         </div>

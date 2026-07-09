@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Monitor, Users, Map, User, EyeOff, Eye, Music, Play, Square, Repeat, FastForward, Clock, Plus, Trash2, Folder, X, Save, Upload, Wind, FileText, Store, Pencil } from 'lucide-react';
+import { Monitor, Users, Map, User, EyeOff, Eye, Music, Play, Square, Repeat, FastForward, Clock, Plus, Trash2, Folder, X, Save, Upload, Wind, FileText, Store, Pencil, FolderOpen, ChevronLeft } from 'lucide-react';
 
 // IMPORTAÇÃO CORRIGIDA: getAssetUrl adicionado!
 import { localDB, getAllDataForBackup, importBackup, generateId, fileToDataUrl, getAssetUrl } from './services/db';
@@ -137,10 +137,29 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  // Filtros de Campanha
+
+  // --- FILTROS DE CAMPANHA E LÓGICA DE PASTAS ---
   const activeLocations = locations.filter(l => l.campaignId === activeCampaignId);
   const activeNpcs = npcs.filter(n => n.campaignId === activeCampaignId);
   const activeTracks = tracks.filter(t => t.campaignId === activeCampaignId);
+  const activeCutscenes = cutscenes.filter(c => c.campaignId === activeCampaignId);
+  const activeHandouts = handouts.filter(h => h.campaignId === activeCampaignId);
+
+  // Estados para saber em que pasta o Mestre está dentro de cada aba
+  const [activeFolderLocations, setActiveFolderLocations] = useState('');
+  const [activeFolderCutscenes, setActiveFolderCutscenes] = useState('');
+  const [activeFolderNpcs, setActiveFolderNpcs] = useState('');
+  const [activeFolderHandouts, setActiveFolderHandouts] = useState('');
+
+  // Lógica de Separação (Mostra as pastas, ou mostra o que está solto na raiz)
+  const locationFolders = [...new Set(activeLocations.map(l => l.folder).filter(Boolean))];
+  const displayLocations = activeFolderLocations ? activeLocations.filter(l => l.folder === activeFolderLocations) : activeLocations.filter(l => !l.folder);
+
+  const cutsceneFolders = [...new Set(activeCutscenes.map(c => c.folder).filter(Boolean))];
+  const displayCutscenes = activeFolderCutscenes ? activeCutscenes.filter(c => c.folder === activeFolderCutscenes) : activeCutscenes.filter(c => !c.folder);
+
+  const handoutFolders = [...new Set(activeHandouts.map(h => h.folder).filter(Boolean))];
+  const displayHandouts = activeFolderHandouts ? activeHandouts.filter(h => h.folder === activeFolderHandouts) : activeHandouts.filter(h => !h.folder);
 
   // --- COMPONENTES VISUAIS ---
 
@@ -469,13 +488,35 @@ export default function App() {
                     </div>
                     
                     <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-                      <div onClick={() => updateSceneElement('location', null)} className="cursor-pointer rounded-xl border-2 p-4 flex items-center justify-center bg-slate-800 h-28 border-slate-700 hover:border-slate-500">
-                        <span className="text-slate-400 text-sm">Fundo Preto</span>
-                      </div>
+                      {/* Botão de Voltar da Pasta */}
+                      {activeFolderLocations && (
+                        <div className="col-span-full flex items-center gap-2 mb-2">
+                          <button onClick={() => setActiveFolderLocations('')} className="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-sm text-slate-300 flex items-center gap-1 transition-colors border border-slate-700">
+                            <ChevronLeft className="w-4 h-4"/> Voltar
+                          </button>
+                          <span className="text-slate-400 text-sm font-bold flex items-center gap-2">
+                            <FolderOpen className="w-4 h-4 text-blue-400" /> Pasta: {activeFolderLocations}
+                          </span>
+                        </div>
+                      )}
+
+                      {!activeFolderLocations && (
+                        <>
+                          <div onClick={() => updateSceneElement('location', null)} className="cursor-pointer rounded-xl border-2 p-4 flex items-center justify-center bg-slate-800 h-28 border-slate-700 hover:border-slate-500">
+                            <span className="text-slate-400 text-sm">Fundo Preto</span>
+                          </div>
+                          {/* Desenha os Ícones de Pastas de Cenários */}
+                          {locationFolders.map(folder => (
+                            <div key={folder} onClick={() => setActiveFolderLocations(folder)} className="cursor-pointer rounded-xl border-2 p-4 flex flex-col items-center justify-center bg-slate-800/80 h-28 border-slate-700 hover:border-blue-500 transition-all group">
+                              <Folder className="w-10 h-10 text-blue-400 group-hover:scale-110 transition-transform mb-2 fill-current opacity-80" />
+                              <span className="text-slate-300 text-sm font-bold truncate w-full text-center">{folder}</span>
+                            </div>
+                          ))}
+                        </>
+                      )}
                       
-                      {activeLocations.map(loc => (
+                      {displayLocations.map(loc => (
                         <div key={loc.id} className="relative group h-28">
-                          {/* CORREÇÃO: getAssetUrl adicionado! */}
                           <div onClick={() => updateSceneElement('location', loc)} className={`cursor-pointer rounded-xl border-2 overflow-hidden w-full h-full relative ${activeScene.location?.id === loc.id ? 'border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)]' : 'border-slate-700 hover:border-slate-500'}`}>
                             <img src={getAssetUrl(loc.image || loc.fileData)} alt={loc.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform" />
                             <div className="absolute inset-0 bg-black/60 flex items-end p-2"><span className="text-white text-xs font-medium truncate">{loc.name}</span></div>
@@ -493,7 +534,7 @@ export default function App() {
                       ))}
                     </div>
                   </section>
-
+                  
                   {/* --- SEÇÃO LOJAS / COMÉRCIO --- */}
                   <section>
                     <div className="flex items-center justify-between border-b border-slate-700 pb-2 mb-4">
@@ -604,7 +645,6 @@ export default function App() {
                     <div className="flex flex-col gap-8">
                       {(() => {
                         const renderCharacterCard = (npc) => {
-                          // CORREÇÃO: getAssetUrl adicionado!
                           const isNpcActive = activeScene.npc?.id === npc.id;
                           const displayImage = isNpcActive ? getAssetUrl(activeScene.npc.fileData) : getAssetUrl(npc.fileData);
 
@@ -629,7 +669,6 @@ export default function App() {
                                       className={`w-5 h-5 md:w-6 md:h-6 rounded-full overflow-hidden border-2 cursor-pointer transition-transform hover:scale-125 bg-slate-900 ${isNpcActive && activeScene.npc.fileData === vImg ? 'border-amber-500 scale-110 shadow-lg' : 'border-slate-400/50 hover:border-white'}`}
                                       title={`Expressão ${idx + 1}`}
                                     >
-                                      {/* CORREÇÃO: getAssetUrl adicionado! */}
                                       <img src={getAssetUrl(vImg)} className="w-full h-full object-cover object-top" alt="var" />
                                     </div>
                                   ))}
@@ -691,18 +730,49 @@ export default function App() {
                               </div>
                             )}
 
-                            <div>
-                              <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-widest mb-3 border-b border-emerald-900/30 pb-1 flex items-center gap-2">
-                                <div className="w-2 h-2 rounded-full bg-emerald-500"></div> Personagens Neutros / Aliados
-                              </h3>
-                              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
-                                <div onClick={() => updateSceneElement('npc', null)} className="cursor-pointer rounded-xl border-2 p-4 flex flex-col items-center justify-center bg-slate-800 h-40 border-slate-700 hover:border-slate-500">
-                                  <EyeOff className="w-8 h-8 text-slate-500 mb-2" />
-                                  <span className="text-slate-400 text-xs">Esconder Personagem</span>
+                            {/* GRUPO: NPCs */}
+                            {(() => {
+                              // Extrai pastas só dos NPCs
+                              const npcFolders = [...new Set(npcsList.map(n => n.folder).filter(Boolean))];
+                              const displayNpcs = activeFolderNpcs ? npcsList.filter(n => n.folder === activeFolderNpcs) : npcsList.filter(n => !n.folder);
+
+                              return (
+                                <div>
+                                  <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-widest mb-3 border-b border-emerald-900/30 pb-1 flex items-center gap-2">
+                                    <div className="w-2 h-2 rounded-full bg-emerald-500"></div> Personagens Neutros / Aliados
+                                  </h3>
+                                  
+                                  {activeFolderNpcs && (
+                                    <div className="flex items-center gap-2 mb-4">
+                                      <button onClick={() => setActiveFolderNpcs('')} className="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-sm text-slate-300 flex items-center gap-1 transition-colors border border-slate-700">
+                                        <ChevronLeft className="w-4 h-4"/> Voltar
+                                      </button>
+                                      <span className="text-slate-400 text-sm font-bold flex items-center gap-2">
+                                        <FolderOpen className="w-4 h-4 text-emerald-400" /> Pasta: {activeFolderNpcs}
+                                      </span>
+                                    </div>
+                                  )}
+
+                                  <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
+                                    {!activeFolderNpcs && (
+                                      <>
+                                        <div onClick={() => updateSceneElement('npc', null)} className="cursor-pointer rounded-xl border-2 p-4 flex flex-col items-center justify-center bg-slate-800 h-40 border-slate-700 hover:border-slate-500">
+                                          <EyeOff className="w-8 h-8 text-slate-500 mb-2" />
+                                          <span className="text-slate-400 text-xs">Esconder Personagem</span>
+                                        </div>
+                                        {npcFolders.map(folder => (
+                                          <div key={folder} onClick={() => setActiveFolderNpcs(folder)} className="cursor-pointer rounded-xl border-2 p-4 flex flex-col items-center justify-center bg-slate-800/80 h-40 border-slate-700 hover:border-emerald-500 transition-all group">
+                                            <Folder className="w-12 h-12 text-emerald-400 group-hover:scale-110 transition-transform mb-2 fill-current opacity-80" />
+                                            <span className="text-slate-300 text-sm font-bold truncate w-full text-center">{folder}</span>
+                                          </div>
+                                        ))}
+                                      </>
+                                    )}
+                                    {displayNpcs.map(renderCharacterCard)}
+                                  </div>
                                 </div>
-                                {npcsList.map(renderCharacterCard)}
-                              </div>
-                            </div>
+                              )
+                            })()}
                           </>
                         )
                       })()}
