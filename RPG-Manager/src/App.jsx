@@ -5,346 +5,89 @@ import { localDB, getAllDataForBackup, importBackup, generateId, fileToDataUrl }
 import { AudioManager, formatTime } from './components/AudioManager';
 import { AmbientManager } from './components/AmbientManager';
 import { SceneRenderer } from './components/SceneRenderer';
+import { AssetModal } from './components/AssetModal';
+
+// O Zustand Store
+import { useRPGStore } from './store/useRPGStore';
 
 // --- GERENCIADOR DE ÁUDIO INVISÍVEL ---
 
 export default function App() {
-  const [role, setRole] = useState(null); 
-  const [isLoading, setIsLoading] = useState(true);
+  // Puxa as variáveis do Zustand
+  const {
+    role, isLoading, setRole, activeCampaignId, setActiveCampaignId,
+    campaigns, locations, npcs, tracks, combatants, cutscenes, handouts, shops,
+    activeScene, queuedTrackId, setQueuedTrackId, audioProgress, setAudioProgress,
+    combatState, loadData, publishScene, deleteAsset, setModalState, updateCollection
+  } = useRPGStore();
 
-  // Estados da Base de Dados Local
-  const [campaigns, setCampaigns] = useState([]);
-  const [locations, setLocations] = useState([]);
-  const [npcs, setNpcs] = useState([]);
-  const [tracks, setTracks] = useState([]);
-  const [activeCampaignId, setActiveCampaignId] = useState(null);
-  const [combatants, setCombatants] = useState([]);
-  const [combatState, setCombatState] = useState({ round: 1, activeId: null });
-  const [cutscenes, setCutscenes] = useState([]);
-  const [handouts, setHandouts] = useState([]);
-  const [shops, setShops] = useState([]);
-  
-  const [activeScene, setActiveScene] = useState({ 
-    location: null, 
-    npc: null, 
-    hideNpcName: false,
-    isMapMode: false,
-    cutscene: null, 
-    handout: null,
-    shop: null,
-    audio: { trackId: null, loop: true, seekEvent: null },
-    ambient: { trackId: null, loop: true }
-  });
-  
-  const [queuedTrackId, setQueuedTrackId] = useState(null);
-  const [audioProgress, setAudioProgress] = useState({ time: 0, duration: 0 });
-  const [modalState, setModalState] = useState({ isOpen: false, type: null, data: null });
-
-  // --- 1. CARREGAR DADOS DA BASE DE DADOS LOCAL ---
-  const loadData = async () => {
-    setIsLoading(true);
-    try {
-      const dbCampaigns = await localDB.getItem('campaigns') || [];
-      const dbLocations = await localDB.getItem('locations') || [];
-      const dbNpcs = await localDB.getItem('npcs') || [];
-      const dbTracks = await localDB.getItem('tracks') || [];
-      const dbCombatants = await localDB.getItem('combatants') || []; 
-      const dbCombatState = await localDB.getItem('combat-state') || { round: 1, activeId: null }; 
-      const dbCutscenes = await localDB.getItem('cutscenes') || [];
-      const dbHandouts = await localDB.getItem('handouts') || [];
-      const dbShops = await localDB.getItem('shops') || [];
-      
-      setCampaigns(dbCampaigns);
-      setLocations(dbLocations);
-      setNpcs(dbNpcs);
-      setTracks(dbTracks);
-      setCombatants(dbCombatants); 
-      setCombatState(dbCombatState); 
-      setCutscenes(dbCutscenes);
-      setHandouts(dbHandouts);
-      setShops(dbShops);
-
-      if (dbCampaigns.length > 0 && !activeCampaignId) {
-        setActiveCampaignId(dbCampaigns[0].id);
-      }
-    } catch (err) {
-      console.error("Erro ao carregar ficheiros locais:", err);
-    }
-    setIsLoading(false);
-  };
-
+  // Carrega os dados na primeira vez
   useEffect(() => {
     loadData();
   }, []);
 
-  // --- 2. SINCRONIZAÇÃO DA CENA ENTRE ABAS (Via BroadcastChannel) ---
-  // --- 2. SINCRONIZAÇÃO DA CENA ENTRE ABAS (Via BroadcastChannel) ---
+  // Inicializa o Sincronizador de Cena (BroadcastChannel)
   useEffect(() => {
     const channel = new BroadcastChannel('rpg-sync');
     
     const loadInitialScene = async () => {
       const savedScene = await localDB.getItem('rpg-active-scene');
       if (savedScene) {
-        setActiveScene({
-          location: savedScene.location || null,
-          npc: savedScene.npc || null,
-          hideNpcName: savedScene.hideNpcName || false,
-          isMapMode: savedScene.isMapMode || false,
-          audio: { 
-            trackId: savedScene.audio?.trackId || null, 
-            loop: savedScene.audio?.loop !== false, 
-            seekEvent: savedScene.audio?.seekEvent || null,
-            volume: savedScene.audio?.volume !== undefined ? savedScene.audio.volume : 1 
-          },
-          ambient: { 
-            trackId: savedScene.ambient?.trackId || null, 
-            loop: savedScene.ambient?.loop !== false,
-            volume: savedScene.ambient?.volume !== undefined ? savedScene.ambient.volume : 0.6 
-          }
-        });
+        useRPGStore.setState({ activeScene: {
+          ...savedScene,
+          audio: { ...savedScene.audio, volume: savedScene.audio?.volume !== undefined ? savedScene.audio.volume : 1 },
+          ambient: { ...savedScene.ambient, volume: savedScene.ambient?.volume !== undefined ? savedScene.ambient.volume : 0.6 }
+        }});
       }
     };
     loadInitialScene();
 
     channel.onmessage = (e) => {
       if (e.data && e.data.type === 'SCENE_UPDATE') {
-        const syncedScene = e.data.scene;
-        setActiveScene({
-          ...syncedScene,
-          ambient: syncedScene?.ambient || { trackId: null, loop: true }
-        });
+        useRPGStore.setState({ activeScene: { ...e.data.scene, ambient: e.data.scene.ambient || { trackId: null, loop: true } } });
       }
     };
 
     return () => channel.close();
   }, []);
 
-  const publishScene = async (newScene) => {
-    setActiveScene(newScene);
-    await localDB.setItem('rpg-active-scene', newScene);
-    const channel = new BroadcastChannel('rpg-sync');
-    channel.postMessage({ type: 'SCENE_UPDATE', scene: newScene });
-    channel.close();
-  };
 
-  // --- 3. SISTEMA CRUD (GUARDAR FICHEIROS LOCALMENTE) ---
-  const saveAsset = async (e) => {
-    e.preventDefault();
-    setIsLoading(true);
-    
-    try {
-      const formData = new FormData(e.target);
-      const isEditing = !!modalState.data;
-
-      // Se for edição, herda os dados antigos (como IDs). Se for novo, gera do zero.
-      const data = isEditing ? { ...modalState.data } : { id: generateId(), campaignId: activeCampaignId };
-      data.name = formData.get('name');
-      
-      const collectionName = modalState.type === 'campaign' ? 'campaigns' : 
-                             modalState.type === 'location' ? 'locations' : 
-                             modalState.type === 'npc' ? 'npcs' : 
-                             modalState.type === 'cutscene' ? 'cutscenes' : 
-                             modalState.type === 'combatant' ? 'combatants' : 
-                             modalState.type === 'handout' ? 'handouts' : 
-                             modalState.type === 'shop' ? 'shops' : 'tracks';
-
-      if (modalState.type === 'npc') {
-        data.role = formData.get('role');
-        data.desc = formData.get('desc');
-        data.type = formData.get('npcType') || 'npc';
-      }
-
-      if (modalState.type === 'combatant') {
-        data.type = formData.get('combatantType');
-        data.initiative = Number(formData.get('initiative')) || 0;
-      }
-
-      if (modalState.type === 'track') {
-        const tagsInput = formData.get('tags') || '';
-        data.tags = tagsInput.split(',').map(t => t.trim()).filter(t => t.length > 0);
-      }
-
-      if (modalState.type === 'handout') {
-        data.desc = formData.get('desc');
-      }
-
-      if (modalState.type === 'shop') {
-        data.vendorId = formData.get('vendorId');
-        const itemsRaw = formData.get('itemsData') || '';
-        data.items = itemsRaw.split('\n').filter(line => line.trim() !== '').map(line => {
-           const parts = line.split('-');
-           if (parts.length > 1) {
-               const price = parts.pop().trim();
-               const name = parts.join('-').trim();
-               return { name, price };
-           }
-           return { name: line.trim(), price: '' };
-        });
-      }
-
-      // PROCESSAMENTO DE ARQUIVOS (Múltiplos para NPCs, Único para o resto)
-      // PROCESSAMENTO DE ARQUIVOS (Múltiplos para NPCs, Único para o resto)
-      const files = formData.getAll('fileInput').filter(f => f.size > 0);
-      
-      // Resgata as imagens que não foram apagadas no modal (apenas para NPCs)
-      let keptVariants = [];
-      if (modalState.type === 'npc' && isEditing) {
-          const variantsStr = formData.get('existingVariants');
-          if (variantsStr) keptVariants = JSON.parse(variantsStr);
-      }
-
-      if (files.length > 0) {
-         if (modalState.type === 'npc') {
-             // 1. Converte as imagens NOVAS
-             const newBase64Images = await Promise.all(files.map(f => fileToDataUrl(f)));
-             // 2. Funde as antigas (mantidas) com as novas
-             const combinedVariants = [...keptVariants, ...newBase64Images];
-             data.variants = combinedVariants;
-             data.fileData = combinedVariants[0]; // A primeira da lista final é sempre a principal
-         } else {
-             data.fileData = await fileToDataUrl(files[0]);
-         }
-      } else if (isEditing) {
-         data.fileData = modalState.data.fileData;
-         
-         if (modalState.type === 'npc') {
-             data.variants = keptVariants;
-             if (data.variants.length > 0) {
-                 data.fileData = data.variants[0]; // Se o Mestre apagou a 1ª imagem, atualiza qual é a nova "Principal"
-             }
-         }
-      }
-
-      // Trava de segurança: Se apagou TODAS as imagens do NPC e não enviou novas
-      if (modalState.type === 'npc' && (!data.variants || data.variants.length === 0)) {
-         alert("O NPC precisa de pelo menos uma imagem! Adicione uma imagem antes de guardar.");
-         setIsLoading(false);
-         return;
-      }
-
-      const currentData = await localDB.getItem(collectionName) || [];
-      let newDataList;
-      
-      if (isEditing) {
-         newDataList = currentData.map(item => item.id === data.id ? data : item);
-         
-         // Atualiza a tela dos jogadores em tempo real se o item editado estiver em cena!
-         if (modalState.type === 'shop' && activeScene.shop?.id === data.id) publishScene({ ...activeScene, shop: data });
-         if (modalState.type === 'npc' && activeScene.npc?.id === data.id) publishScene({ ...activeScene, npc: data });
-         if (modalState.type === 'location' && activeScene.location?.id === data.id) publishScene({ ...activeScene, location: data });
-      } else {
-         newDataList = [...currentData, data];
-      }
-      
-      await localDB.setItem(collectionName, newDataList);
-      
-      // Distribui para o estado visual correto
-      if (collectionName === 'campaigns') { setCampaigns(newDataList); if (!isEditing) setActiveCampaignId(data.id); }
-      if (collectionName === 'locations') setLocations(newDataList);
-      if (collectionName === 'npcs') setNpcs(newDataList);
-      if (collectionName === 'tracks') setTracks(newDataList);
-      if (collectionName === 'combatants') setCombatants(newDataList);
-      if (collectionName === 'cutscenes') setCutscenes(newDataList);
-      if (collectionName === 'handouts') setHandouts(newDataList);
-      if (collectionName === 'shops') setShops(newDataList);
-
-    } catch (err) {
-      console.error("Erro ao guardar ativo:", err);
-      // Alerta melhorado para mostrar exatamente onde o navegador quebrou
-      alert("Erro fatal ao guardar: " + err.message + "\n\n(Dica: Se o erro falar de limite de tamanho, tente usar imagens PNG/JPG mais leves!)");
-    }
-
-    setModalState({ isOpen: false, type: null, data: null });
-    setIsLoading(false);
-  };
-
-  const deleteAsset = async (collectionName, id) => {
-    if(!confirm("Tem a certeza que quer apagar isto?")) return;
-    
-    try {
-      const currentData = await localDB.getItem(collectionName) || [];
-      const newDataList = currentData.filter(item => item.id !== id);
-      
-      await localDB.setItem(collectionName, newDataList);
-      
-      if (collectionName === 'campaigns') {
-        setCampaigns(newDataList);
-        if(activeCampaignId === id) setActiveCampaignId(null);
-      }
-      if (collectionName === 'locations') setLocations(newDataList);
-      if (collectionName === 'npcs') setNpcs(newDataList);
-      if (collectionName === 'tracks') setTracks(newDataList);
-      if (collectionName === 'combatants') setCombatants(newDataList);
-      if (collectionName === 'cutscenes') setCutscenes(newDataList);
-      if (collectionName === 'handouts') setHandouts(newDataList);
-      if (collectionName === 'shops') setShops(newDataList);
-    } catch (err) {
-      console.error("Erro ao apagar ativo:", err);
-    }
-  };
-
-
-  // --- 4. FUNÇÕES DE CONTROLO DO MESTRE ---
+  // --- FUNÇÕES DE CONTROLE DO MESTRE ---
   const updateSceneElement = (type, item) => {
     if (item && (type === 'location' || type === 'npc')) {
-      // Remove estritamente as notas secretas antes de enviar para a cena ativa pública
       const { secretNotes, ...publicItem } = item;
       publishScene({ ...activeScene, [type]: publicItem });
     } else {
       publishScene({ ...activeScene, [type]: item });
     }
   };
-  const stopAudio = () => { publishScene({ ...activeScene, audio: { ...activeScene.audio, trackId: null } }); setQueuedTrackId(null); };
-  const toggleLoop = () => publishScene({ ...activeScene, audio: { ...activeScene.audio, loop: !activeScene.audio.loop } });
-
-  const stopAmbient = () => publishScene({ ...activeScene, ambient: { ...activeScene.ambient, trackId: null } });
-  const toggleAmbientLoop = () => publishScene({ ...activeScene, ambient: { ...activeScene.ambient, loop: !activeScene.ambient.loop } });
-  const playAmbient = (trackId) => publishScene({ ...activeScene, ambient: { ...activeScene.ambient, trackId, loop: true } });
-  const updateAssetNotes = async (collection, id, notesText) => {
-    if (collection === 'locations') {
-      const updated = locations.map(loc => loc.id === id ? { ...loc, secretNotes: notesText } : loc);
-      setLocations(updated);
-      await localDB.setItem('locations', updated);
-    } else if (collection === 'npcs') {
-      const updated = npcs.map(npc => npc.id === id ? { ...npc, secretNotes: notesText } : npc);
-      setNpcs(updated);
-      await localDB.setItem('npcs', updated);
-    }
-  };
-
-  const handleVolumeChange = (e) => {
-    const vol = Number(e.target.value);
-    publishScene({ ...activeScene, audio: { ...activeScene.audio, volume: vol } });
-  };
-
-  const handleAmbientVolumeChange = (e) => {
-    const vol = Number(e.target.value);
-    publishScene({ ...activeScene, ambient: { ...activeScene.ambient, volume: vol } });
-  };
-  
-  const executeTransition = () => {
-    if (!queuedTrackId) return;
-    publishScene({ ...activeScene, audio: { ...activeScene.audio, trackId: queuedTrackId } });
-    setQueuedTrackId(null);
-  };
-
-  const handleSeekChange = (e) => setAudioProgress(prev => ({ ...prev, time: Number(e.target.value) }));
-  const handleSeekCommit = (e) => {
-    const newTime = Number(e.target.value);
-    publishScene({ ...activeScene, audio: { ...activeScene.audio, seekEvent: { time: newTime, id: Date.now() } } });
-  };
 
   const clearScene = () => {
-    publishScene({ 
-      location: null, 
-      npc: null, 
-      hideNpcName: false, 
-      isMapMode: false, // <-- NOVO
-      audio: { trackId: null, loop: true, seekEvent: null },
-      ambient: { trackId: null, loop: true }
-    });
+    publishScene({ location: null, npc: null, hideNpcName: false, isMapMode: false, cutscene: null, handout: null, shop: null, audio: { trackId: null, loop: true, seekEvent: null }, ambient: { trackId: null, loop: true } });
     setQueuedTrackId(null);
   };
+
+  // --- FUNÇÕES DE NOTAS SECRETAS ---
+  const updateAssetNotes = async (collectionName, id, notes) => {
+    const currentData = useRPGStore.getState()[collectionName] || [];
+    const newData = currentData.map(item => item.id === id ? { ...item, secretNotes: notes } : item);
+    updateCollection(collectionName, newData);
+    await localDB.setItem(collectionName, newData);
+  };
+
+  // --- CONTROLES DE ÁUDIO DA TRILHA ---
+  const handleVolumeChange = (e) => publishScene({ ...activeScene, audio: { ...activeScene.audio, volume: parseFloat(e.target.value) } });
+  const toggleLoop = (e) => publishScene({ ...activeScene, audio: { ...activeScene.audio, loop: e.target.checked } });
+  const stopAudio = () => { publishScene({ ...activeScene, audio: { ...activeScene.audio, trackId: null, seekEvent: null } }); setQueuedTrackId(null); };
+  const executeTransition = () => { if (queuedTrackId) { publishScene({ ...activeScene, audio: { ...activeScene.audio, trackId: queuedTrackId, seekEvent: 0 } }); setQueuedTrackId(null); } };
+  const handleSeekChange = (e) => setAudioProgress({ ...audioProgress, time: Number(e.target.value) });
+  const handleSeekCommit = (e) => publishScene({ ...activeScene, audio: { ...activeScene.audio, seekEvent: Number(e.target.value) } });
+
+  // --- CONTROLES DE SOM AMBIENTE ---
+  const handleAmbientVolumeChange = (e) => publishScene({ ...activeScene, ambient: { ...activeScene.ambient, volume: parseFloat(e.target.value) } });
+  const toggleAmbientLoop = (e) => publishScene({ ...activeScene, ambient: { ...activeScene.ambient, loop: e.target.checked } });
+  const stopAmbient = () => publishScene({ ...activeScene, ambient: { ...activeScene.ambient, trackId: null } });
+  const playAmbient = (id) => publishScene({ ...activeScene, ambient: { ...activeScene.ambient, trackId: id } });
 
   // --- INTERFACE DE BACKUP ---
   const handleExportBackup = async () => {
@@ -402,7 +145,7 @@ export default function App() {
   // --- COMPONENTES VISUAIS ---
 
   if (isLoading && role === null) {
-    return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-amber-500 font-bold animate-pulse">A Carregar Base de Dados Local...</div>;
+    return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-amber-500 font-bold animate-pulse">Carregando Banco de Dados Local...</div>;
   }
 
   if (!role) {
@@ -423,187 +166,6 @@ export default function App() {
       </div>
     );
   }
-
-  
-
-  const AssetModal = () => {
-    // --- NOVO: Gestão temporária das variantes (expressões) no modal ---
-    const [currentVariants, setCurrentVariants] = useState([]);
-
-    useEffect(() => {
-      if (modalState.isOpen && modalState.type === 'npc' && modalState.data?.variants) {
-        setCurrentVariants(modalState.data.variants);
-      } else if (modalState.isOpen) {
-        setCurrentVariants([]);
-      }
-    }, [modalState]);
-
-    const removeVariant = (indexToRemove) => {
-      setCurrentVariants(prev => prev.filter((_, idx) => idx !== indexToRemove));
-    };
-
-    if (!modalState.isOpen) return null;
-    
-    const titles = { campaign: 'Nova Campanha', location: 'Novo Cenário', npc: 'Novo NPC', track: 'Nova Música / Som', combatant: 'Adicionar à Iniciativa', handout: 'Novo Handout / Item', shop: 'Nova Loja / Mercador' };
-    const isEditing = !!modalState.data;
-
-    return (
-      <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-        <div className="bg-slate-900 border border-slate-700 p-6 rounded-2xl w-full max-w-md shadow-2xl animate-fade-in-up custom-scrollbar max-h-[90vh] overflow-y-auto">
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="text-xl font-bold text-amber-500">{isEditing ? 'Editar Ficheiro' : titles[modalState.type]}</h3>
-            <button onClick={() => setModalState({ isOpen: false, type: null, data: null })} className="text-slate-400 hover:text-white"><X className="w-6 h-6" /></button>
-          </div>
-          
-          <form onSubmit={saveAsset} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-slate-400 uppercase font-bold">Nome</label>
-              <input name="name" defaultValue={modalState.data?.name} required className="bg-slate-950 border border-slate-700 rounded-lg p-3 text-white" placeholder="Obrigatório..." />
-            </div>
-
-            {modalState.type === 'cutscene' && (
-              <div className="flex flex-col gap-1 border-t border-slate-800 pt-3 mt-1">
-                <label className="text-xs text-slate-400 uppercase font-bold">Upload de Vídeo (MP4/WEBM)</label>
-                <input type="file" name="fileInput" accept="video/mp4,video/webm" required={!isEditing} className="text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-pink-900/30 file:text-pink-500 hover:file:bg-pink-900/50" />
-                {isEditing && <span className="text-[10px] text-emerald-500 italic mt-1">Vídeo já guardado. Envie apenas se quiser substituir.</span>}
-              </div>
-            )}
-
-            {modalState.type === 'npc' && (
-              <>
-                <div className="flex gap-4">
-                  <div className="flex flex-col gap-1 flex-1">
-                    <label className="text-xs text-slate-400 uppercase font-bold">Categoria</label>
-                    <select name="npcType" defaultValue={modalState.data?.type || 'npc'} className="bg-slate-950 border border-slate-700 rounded-lg p-3 text-white">
-                      <option value="npc">NPC / Aliado</option>
-                      <option value="player">Jogador</option>
-                      <option value="enemy">Inimigo</option>
-                    </select>
-                  </div>
-                  <div className="flex flex-col gap-1 flex-1">
-                    <label className="text-xs text-slate-400 uppercase font-bold">Papel / Título</label>
-                    <input name="role" defaultValue={modalState.data?.role} className="bg-slate-950 border border-slate-700 rounded-lg p-3 text-white" placeholder="Ex: Guerreiro" />
-                  </div>
-                </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs text-slate-400 uppercase font-bold">Descrição Oculta (Apenas Mestre)</label>
-                  <textarea name="desc" defaultValue={modalState.data?.desc} rows="2" className="bg-slate-950 border border-slate-700 rounded-lg p-3 text-white text-sm" placeholder="Opcional..." />
-                </div>
-              </>
-            )}
-
-            {/* Campo ÚNICO de Upload para Cenários, Combatentes, Handouts e Lojas */}
-            {(modalState.type === 'location' || modalState.type === 'combatant' || modalState.type === 'handout' || modalState.type === 'shop') && (
-              <div className="flex flex-col gap-1 border-t border-slate-800 pt-3 mt-1">
-                <label className="text-xs text-slate-400 uppercase font-bold">Upload de Imagem (PNG/JPG)</label>
-                <input type="file" name="fileInput" accept="image/*" required={!isEditing} className="text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-amber-900/30 file:text-amber-500 hover:file:bg-amber-900/50" />
-                {isEditing && <span className="text-[10px] text-emerald-500 italic mt-1">Imagem já guardada. Envie uma nova apenas se quiser substituir.</span>}
-              </div>
-            )}
-
-            {/* UPGRADE: Campo MÚLTIPLO Exclusivo para NPCs com Galeria Editável */}
-            {modalState.type === 'npc' && (
-              <div className="flex flex-col gap-1 border-t border-slate-800 pt-3 mt-1">
-                <label className="text-xs text-slate-400 uppercase font-bold text-emerald-400">Gerir Imagens (Expressões)</label>
-                
-                {/* --- Galeria de Edição das Variantes --- */}
-                {isEditing && currentVariants.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mb-2 bg-slate-950 p-2 rounded-lg border border-slate-800 shadow-inner">
-                    {currentVariants.map((vImg, idx) => (
-                      <div key={idx} className="relative w-14 h-14 rounded overflow-hidden border border-slate-700 group">
-                        <img src={vImg} className="w-full h-full object-cover object-top" alt="var" />
-                        <button 
-                          type="button" 
-                          onClick={() => removeVariant(idx)} 
-                          className="absolute inset-0 bg-red-900/80 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                          title="Apagar Expressão"
-                        >
-                          <Trash2 className="w-5 h-5 text-white drop-shadow-md" />
-                        </button>
-                        {idx === 0 && (
-                          <span className="absolute bottom-0 left-0 w-full text-[8px] bg-emerald-600 text-white text-center font-bold tracking-widest">PRINCIPAL</span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Input Invisível para passar as imagens que sobreviveram à edição para o saveAsset */}
-                <input type="hidden" name="existingVariants" value={JSON.stringify(currentVariants)} />
-
-                <input type="file" name="fileInput" accept="image/*" multiple required={!isEditing || currentVariants.length === 0} className="text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-emerald-900/30 file:text-emerald-500 hover:file:bg-emerald-900/50" />
-                
-                <span className="text-[10px] text-slate-400 italic mt-1">
-                  Dica: Segure <kbd className="bg-slate-800 px-1 rounded">CTRL</kbd> para selecionar várias imagens de uma vez.
-                </span>
-                {isEditing && <span className="text-[10px] text-emerald-500 font-bold mt-1">As novas imagens selecionadas serão ADICIONADAS à lista acima.</span>}
-              </div>
-            )}
-
-            {modalState.type === 'track' && (
-              <>
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs text-slate-400 uppercase font-bold">Upload de Áudio (MP3/WAV)</label>
-                  <input type="file" name="fileInput" accept="audio/*" required={!isEditing} className="text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-purple-900/30 file:text-purple-400 hover:file:bg-purple-900/50" />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs text-slate-400 uppercase font-bold">Tags / Categorias (Separadas por vírgula)</label>
-                  <input name="tags" defaultValue={modalState.data?.tags?.join(', ')} className="bg-slate-950 border border-slate-700 rounded-lg p-3 text-white text-sm focus:border-purple-500" placeholder="Ex: Combate, Tranquila, Suspense" />
-                </div>
-              </>
-            )}
-
-            {modalState.type === 'combatant' && (
-              <div className="flex gap-4 border-t border-slate-800 pt-3 mt-1">
-                <div className="flex flex-col gap-1 flex-1">
-                  <label className="text-xs text-slate-400 uppercase font-bold">Tipo</label>
-                  <select name="combatantType" defaultValue={modalState.data?.type || 'enemy'} className="bg-slate-950 border border-slate-700 rounded-lg p-3 text-white">
-                    <option value="enemy">Inimigo</option>
-                    <option value="player">Jogador</option>
-                    <option value="ally">Aliado</option>
-                  </select>
-                </div>
-                <div className="flex flex-col gap-1 flex-1">
-                  <label className="text-xs text-slate-400 uppercase font-bold">Iniciativa</label>
-                  <input type="number" name="initiative" defaultValue={modalState.data?.initiative} required className="bg-slate-950 border border-slate-700 rounded-lg p-3 text-white" placeholder="Ex: 18" />
-                </div>
-              </div>
-            )}
-
-            {modalState.type === 'handout' && (
-              <div className="flex flex-col gap-1 mt-2">
-                <label className="text-xs text-slate-400 uppercase font-bold">Descrição / Texto (Aparece na tela)</label>
-                <textarea name="desc" defaultValue={modalState.data?.desc} rows="3" className="bg-slate-950 border border-slate-700 rounded-lg p-3 text-white text-sm" placeholder="Opcional. Ex: O texto escrito na carta, ou os atributos da arma..." />
-              </div>
-            )}
-
-            {modalState.type === 'shop' && (
-              <>
-                <div className="flex flex-col gap-1 mt-2">
-                  <label className="text-xs text-slate-400 uppercase font-bold">Vendedor (NPC)</label>
-                  <select name="vendorId" defaultValue={modalState.data?.vendorId || ''} required className="bg-slate-950 border border-slate-700 rounded-lg p-3 text-white">
-                    <option value="" disabled>Selecione o NPC vendedor...</option>
-                    {npcs.filter(n => n.campaignId === activeCampaignId).map(n => (
-                      <option key={n.id} value={n.id}>{n.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex flex-col gap-1 mt-2">
-                  <label className="text-xs text-slate-400 uppercase font-bold">Lista de Itens (1 por linha)</label>
-                  <textarea name="itemsData" defaultValue={modalState.data?.items?.map(i => `${i.name} - ${i.price}`).join('\n')} rows="5" required className="bg-slate-950 border border-slate-700 rounded-lg p-3 text-white text-sm" placeholder="Exemplo:&#10;Cerveja Artesanal - 3 GP&#10;Kit de Reparo - 60 GP" />
-                  <span className="text-[10px] text-slate-500 italic">Formato: Nome do Item - Preço (Separe sempre com um traço)</span>
-                </div>
-              </>
-            )}
-
-            <button type="submit" disabled={isLoading} className="mt-4 bg-amber-600 hover:bg-amber-500 text-black font-bold py-3 rounded-xl flex items-center justify-center gap-2 disabled:opacity-50 transition-colors">
-              <Save className="w-5 h-5" /> {isLoading ? "A Guardar..." : isEditing ? "Atualizar Ficheiro Offline" : "Guardar Ficheiro Offline"}
-            </button>
-          </form>
-        </div>
-      </div>
-    );
-  };
 
 
   // --- SISTEMA DE COMBATE ---
@@ -641,20 +203,22 @@ export default function App() {
     setTurn(activeCombatants[nextIndex]);
   };
 
-  const clearCombat = () => {
-    if(!confirm("Limpar toda a iniciativa atual?")) return;
-    setCombatants(combatants.filter(c => c.campaignId !== activeCampaignId));
-    localDB.setItem('combatants', combatants.filter(c => c.campaignId !== activeCampaignId));
+  const clearCombat = async () => {
+    if(!window.confirm("Limpar toda a iniciativa atual?")) return;
+    const filtered = combatants.filter(c => c.campaignId !== activeCampaignId);
+    
+    updateCollection('combatants', filtered); // Usa o Zustand!
+    await localDB.setItem('combatants', filtered);
     updateCombatState({ round: 1, activeId: null });
     updateSceneElement('npc', null);
   };
+
   const quickAddToCombat = async (npc) => {
     const initStr = window.prompt(`Digite a Iniciativa rolada para ${npc.name}:`, "10");
-    if (initStr === null) return; // Mestre cancelou
+    if (initStr === null) return;
     
     const initiative = Number(initStr) || 0;
     
-    // Mapeia o tipo do NPC para o tipo de combatente
     let combatType = 'ally';
     if (npc.type === 'player') combatType = 'player';
     if (npc.type === 'enemy') combatType = 'enemy';
@@ -669,7 +233,7 @@ export default function App() {
     };
 
     const updatedCombatants = [...combatants, newCombatant];
-    setCombatants(updatedCombatants);
+    updateCollection('combatants', updatedCombatants); // Usa o Zustand!
     await localDB.setItem('combatants', updatedCombatants);
   };
 
