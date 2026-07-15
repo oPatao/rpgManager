@@ -53,6 +53,15 @@ export default function App() {
             [e.data.audioType]: { ...state.activeScene[e.data.audioType], volume: e.data.volume }
           }
         }));
+      } else if (e.data && e.data.type === 'AUDIO_UPDATE') {
+        // O SEGREDO: Atualiza APENAS o áudio, mantendo os arquivos de imagem (Blobs) 100% intactos!
+        useRPGStore.setState(state => ({
+          activeScene: {
+            ...state.activeScene,
+            audio: e.data.audio,
+            ambient: e.data.ambient
+          }
+        }));
       }
     };
 
@@ -83,6 +92,22 @@ export default function App() {
     await localDB.setItem(collectionName, newData);
   };
 
+  // --- ROTA EXPRESSA DE ÁUDIO (Evita piscar a tela) ---
+  const publishAudioOnly = async (newAudio, newAmbient) => {
+    const updatedScene = {
+      ...activeScene,
+      audio: newAudio !== undefined ? newAudio : activeScene.audio,
+      ambient: newAmbient !== undefined ? newAmbient : activeScene.ambient
+    };
+    useRPGStore.setState({ activeScene: updatedScene }); // Atualiza local
+    await localDB.setItem('rpg-active-scene', updatedScene); // Salva no HD
+    
+    // Envia SÓ O ÁUDIO pelo túnel!
+    const channel = new BroadcastChannel('rpg-sync');
+    channel.postMessage({ type: 'AUDIO_UPDATE', audio: updatedScene.audio, ambient: updatedScene.ambient });
+    channel.close();
+  };
+
   // --- CONTROLES DE ÁUDIO DA TRILHA ---
   const handleVolumeChange = (e) => {
     const vol = parseFloat(e.target.value);
@@ -91,13 +116,14 @@ export default function App() {
     channel.postMessage({ type: 'VOLUME_UPDATE', audioType: 'audio', volume: vol });
     channel.close();
   };
-  const handleVolumeCommit = (e) => publishScene({ ...activeScene, audio: { ...activeScene.audio, volume: parseFloat(e.target.value) } });
+  // Agora os comandos de áudio usam a rota expressa!
+  const handleVolumeCommit = (e) => publishAudioOnly({ ...activeScene.audio, volume: parseFloat(e.target.value) }, undefined);
 
-  const toggleLoop = (e) => publishScene({ ...activeScene, audio: { ...activeScene.audio, loop: e.target.checked } });
-  const stopAudio = () => { publishScene({ ...activeScene, audio: { ...activeScene.audio, trackId: null, seekEvent: null } }); setQueuedTrackId(null); };
-  const executeTransition = () => { if (queuedTrackId) { publishScene({ ...activeScene, audio: { ...activeScene.audio, trackId: queuedTrackId, seekEvent: 0 } }); setQueuedTrackId(null); } };
+  const toggleLoop = (e) => publishAudioOnly({ ...activeScene.audio, loop: e.target.checked }, undefined);
+  const stopAudio = () => { publishAudioOnly({ ...activeScene.audio, trackId: null, seekEvent: null }, undefined); setQueuedTrackId(null); };
+  const executeTransition = () => { if (queuedTrackId) { publishAudioOnly({ ...activeScene.audio, trackId: queuedTrackId, seekEvent: 0 }, undefined); setQueuedTrackId(null); } };
   const handleSeekChange = (e) => setAudioProgress({ ...audioProgress, time: Number(e.target.value) });
-  const handleSeekCommit = (e) => publishScene({ ...activeScene, audio: { ...activeScene.audio, seekEvent: Number(e.target.value) } });
+  const handleSeekCommit = (e) => publishAudioOnly({ ...activeScene.audio, seekEvent: Number(e.target.value) }, undefined);
 
   // --- CONTROLES DE SOM AMBIENTE ---
   const handleAmbientVolumeChange = (e) => {
@@ -107,11 +133,13 @@ export default function App() {
     channel.postMessage({ type: 'VOLUME_UPDATE', audioType: 'ambient', volume: vol });
     channel.close();
   };
-  const handleAmbientVolumeCommit = (e) => publishScene({ ...activeScene, ambient: { ...activeScene.ambient, volume: parseFloat(e.target.value) } });
+  const handleAmbientVolumeCommit = (e) => publishAudioOnly(undefined, { ...activeScene.ambient, volume: parseFloat(e.target.value) });
 
-  const toggleAmbientLoop = (e) => publishScene({ ...activeScene, ambient: { ...activeScene.ambient, loop: e.target.checked } });
-  const stopAmbient = () => publishScene({ ...activeScene, ambient: { ...activeScene.ambient, trackId: null } });
-  const playAmbient = (id) => publishScene({ ...activeScene, ambient: { ...activeScene.ambient, trackId: id } });
+  const toggleAmbientLoop = (e) => publishAudioOnly(undefined, { ...activeScene.ambient, loop: e.target.checked });
+  const stopAmbient = () => publishAudioOnly(undefined, { ...activeScene.ambient, trackId: null });
+  const playAmbient = (id) => publishAudioOnly(undefined, { ...activeScene.ambient, trackId: id });
+
+
   // --- INTERFACE DE BACKUP ---
   const handleExportBackup = async () => {
     try {
@@ -279,8 +307,12 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 flex flex-col h-screen overflow-hidden">
-      <AudioManager audioState={activeScene.audio} setAudioProgress={setAudioProgress} tracksList={tracks} />
-      <AmbientManager ambientState={activeScene.ambient} tracksList={tracks} />
+      {role === 'master' && (
+        <>
+          <AudioManager audioState={activeScene.audio} setAudioProgress={setAudioProgress} tracksList={tracks} />
+          <AmbientManager ambientState={activeScene.ambient} tracksList={tracks} />
+        </>
+      )}
       <AssetModal />
       
 
