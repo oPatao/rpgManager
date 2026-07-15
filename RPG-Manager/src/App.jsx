@@ -46,6 +46,13 @@ export default function App() {
     channel.onmessage = (e) => {
       if (e.data && e.data.type === 'SCENE_UPDATE') {
         useRPGStore.setState({ activeScene: { ...e.data.scene, ambient: e.data.scene.ambient || { trackId: null, loop: true } } });
+      } else if (e.data && e.data.type === 'VOLUME_UPDATE') {
+        useRPGStore.setState(state => ({
+          activeScene: {
+            ...state.activeScene,
+            [e.data.audioType]: { ...state.activeScene[e.data.audioType], volume: e.data.volume }
+          }
+        }));
       }
     };
 
@@ -77,7 +84,15 @@ export default function App() {
   };
 
   // --- CONTROLES DE ÁUDIO DA TRILHA ---
-  const handleVolumeChange = (e) => publishScene({ ...activeScene, audio: { ...activeScene.audio, volume: parseFloat(e.target.value) } });
+  const handleVolumeChange = (e) => {
+    const vol = parseFloat(e.target.value);
+    useRPGStore.setState(state => ({ activeScene: { ...state.activeScene, audio: { ...state.activeScene.audio, volume: vol } } }));
+    const channel = new BroadcastChannel('rpg-sync');
+    channel.postMessage({ type: 'VOLUME_UPDATE', audioType: 'audio', volume: vol });
+    channel.close();
+  };
+  const handleVolumeCommit = (e) => publishScene({ ...activeScene, audio: { ...activeScene.audio, volume: parseFloat(e.target.value) } });
+
   const toggleLoop = (e) => publishScene({ ...activeScene, audio: { ...activeScene.audio, loop: e.target.checked } });
   const stopAudio = () => { publishScene({ ...activeScene, audio: { ...activeScene.audio, trackId: null, seekEvent: null } }); setQueuedTrackId(null); };
   const executeTransition = () => { if (queuedTrackId) { publishScene({ ...activeScene, audio: { ...activeScene.audio, trackId: queuedTrackId, seekEvent: 0 } }); setQueuedTrackId(null); } };
@@ -85,11 +100,18 @@ export default function App() {
   const handleSeekCommit = (e) => publishScene({ ...activeScene, audio: { ...activeScene.audio, seekEvent: Number(e.target.value) } });
 
   // --- CONTROLES DE SOM AMBIENTE ---
-  const handleAmbientVolumeChange = (e) => publishScene({ ...activeScene, ambient: { ...activeScene.ambient, volume: parseFloat(e.target.value) } });
+  const handleAmbientVolumeChange = (e) => {
+    const vol = parseFloat(e.target.value);
+    useRPGStore.setState(state => ({ activeScene: { ...state.activeScene, ambient: { ...state.activeScene.ambient, volume: vol } } }));
+    const channel = new BroadcastChannel('rpg-sync');
+    channel.postMessage({ type: 'VOLUME_UPDATE', audioType: 'ambient', volume: vol });
+    channel.close();
+  };
+  const handleAmbientVolumeCommit = (e) => publishScene({ ...activeScene, ambient: { ...activeScene.ambient, volume: parseFloat(e.target.value) } });
+
   const toggleAmbientLoop = (e) => publishScene({ ...activeScene, ambient: { ...activeScene.ambient, loop: e.target.checked } });
   const stopAmbient = () => publishScene({ ...activeScene, ambient: { ...activeScene.ambient, trackId: null } });
   const playAmbient = (id) => publishScene({ ...activeScene, ambient: { ...activeScene.ambient, trackId: id } });
-
   // --- INTERFACE DE BACKUP ---
   const handleExportBackup = async () => {
     try {
@@ -344,7 +366,12 @@ export default function App() {
                       <div className="flex gap-4 items-center ml-auto">
                         <div className="flex items-center gap-2 bg-slate-950/60 px-2 py-1 rounded border border-slate-800">
                           <span className="text-[10px] text-slate-400 font-bold uppercase">Vol:</span>
-                          <input type="range" min="0" max="1" step="0.05" value={activeScene.audio?.volume !== undefined ? activeScene.audio.volume : 1} onChange={handleVolumeChange} className="w-16 md:w-24 accent-purple-500 h-1 bg-slate-800 rounded appearance-none cursor-pointer" />
+                          <input type="range" min="0" max="1" step="0.05" 
+                            value={activeScene.audio?.volume !== undefined ? activeScene.audio.volume : 1} 
+                            onChange={handleVolumeChange} 
+                            onMouseUp={handleVolumeCommit} 
+                            onTouchEnd={handleVolumeCommit} 
+                            className="w-16 md:w-24 accent-purple-500 h-1 bg-slate-800 rounded appearance-none cursor-pointer" />
                         </div>
 
                         {queuedTrackId && (
@@ -374,7 +401,12 @@ export default function App() {
                       <div className="flex gap-4 items-center ml-auto">
                         <div className="flex items-center gap-2 bg-slate-950/60 px-2 py-1 rounded border border-slate-800">
                           <span className="text-[10px] text-slate-400 font-bold uppercase">Vol:</span>
-                          <input type="range" min="0" max="1" step="0.05" value={activeScene.ambient?.volume !== undefined ? activeScene.ambient.volume : 0.6} onChange={handleAmbientVolumeChange} className="w-16 md:w-24 accent-emerald-500 h-1 bg-slate-800 rounded appearance-none cursor-pointer" />
+                          <input type="range" min="0" max="1" step="0.05" 
+                            value={activeScene.ambient?.volume !== undefined ? activeScene.ambient.volume : 0.6} 
+                            onChange={handleAmbientVolumeChange} 
+                            onMouseUp={handleAmbientVolumeCommit} 
+                            onTouchEnd={handleAmbientVolumeCommit} 
+                            className="w-16 md:w-24 accent-emerald-500 h-1 bg-slate-800 rounded appearance-none cursor-pointer" />
                         </div>
 
                         <label className="flex items-center gap-1 text-xs text-slate-400 cursor-pointer hover:text-white">
