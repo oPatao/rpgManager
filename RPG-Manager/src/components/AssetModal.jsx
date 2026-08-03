@@ -42,6 +42,7 @@ export const AssetModal = () => {
       
       const collectionName = modalState.type === 'campaign' ? 'campaigns' : 
                              modalState.type === 'location' ? 'locations' : 
+                             modalState.type === 'refuge' ? 'refuges' :
                              modalState.type === 'npc' ? 'npcs' : 
                              modalState.type === 'cutscene' ? 'cutscenes' : 
                              modalState.type === 'combatant' ? 'combatants' : 
@@ -61,6 +62,22 @@ export const AssetModal = () => {
       if (modalState.type === 'track') {
         const tagsInput = formData.get('tags') || '';
         data.tags = tagsInput.split(',').map(t => t.trim()).filter(t => t.length > 0);
+      }
+      if (modalState.type === 'refuge' && !isEditing) {
+        data.level = 1;
+        data.population = 1;
+        data.structures = 0;
+        data.stats = {
+          moral: 3, defesa: 1, beligerancia: 1,
+          resources: {
+            agua: { cur: 0, max: 100 }, plantas: { cur: 0, max: 100 },
+            animais: { cur: 0, max: 100 }, madeira: { cur: 0, max: 100 },
+            minerais: { cur: 0, max: 100 }, biomassa: { cur: 0, max: 100 },
+            alimento: { cur: 0, max: 100 }, vestuario: { cur: 0, max: 100 },
+            municao: { cur: 0, max: 100 }, combustivel: { cur: 0, max: 100 },
+            medicamento: { cur: 0, max: 100 }, material: { cur: 0, max: 100 }
+          }
+        };
       }
       if (modalState.type === 'handout') {
         data.desc = formData.get('desc');

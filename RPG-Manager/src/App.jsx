@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Monitor, Users, Map, User, EyeOff, Eye, Music, Play, Square, Repeat, FastForward, Clock, Plus, Trash2, Folder, X, Save, Upload, Wind, FileText, Store, Pencil, FolderOpen, ChevronLeft } from 'lucide-react';
+import { Monitor, Users, Map, User, EyeOff, Eye, Music, Play, Square, Repeat, FastForward, Clock, Plus, Trash2, Folder, X, Save, Upload, Wind, FileText, Store, Pencil, FolderOpen, ChevronLeft,Shield, Home, Battery } from 'lucide-react';
 
 // IMPORTAÇÃO CORRIGIDA: getAssetUrl adicionado!
 import { localDB, getAllDataForBackup, importBackup, generateId, fileToDataUrl, getAssetUrl } from './services/db';
@@ -195,6 +195,11 @@ export default function App() {
   const activeCutscenes = cutscenes.filter(c => c.campaignId === activeCampaignId);
   const activeHandouts = handouts.filter(h => h.campaignId === activeCampaignId);
 
+  const activeRefuges = (useRPGStore.getState().refuges || []).filter(r => r.campaignId === activeCampaignId);
+  const [activeFolderRefuges, setActiveFolderRefuges] = useState('');
+  const displayRefuges = activeFolderRefuges ? activeRefuges.filter(r => r.folder === activeFolderRefuges) : activeRefuges.filter(r => !r.folder);
+  const refugeFolders = [...new Set(activeRefuges.map(r => r.folder).filter(Boolean))];
+
   // Estados para saber em que pasta o Mestre está dentro de cada aba
   const [activeFolderLocations, setActiveFolderLocations] = useState('');
   const [activeFolderCutscenes, setActiveFolderCutscenes] = useState('');
@@ -303,6 +308,21 @@ export default function App() {
     const updatedCombatants = [...combatants, newCombatant];
     updateCollection('combatants', updatedCombatants);
     await localDB.setItem('combatants', updatedCombatants);
+  };
+  //refugios
+  const handleRefugeStatUpdate = async (field, value, isResource = false, resKey = null, resType = 'cur') => {
+    if (!activeScene.refuge) return;
+    let updatedRefuge = JSON.parse(JSON.stringify(activeScene.refuge)); // Clone profundo simples
+    
+    if (isResource) updatedRefuge.stats.resources[resKey][resType] = Number(value);
+    else if (field.includes('stats.')) updatedRefuge.stats[field.split('.')[1]] = Number(value);
+    else updatedRefuge[field] = Number(value);
+
+    // Sincroniza a tela e salva no banco de dados para não perder os dados
+    publishScene({ ...activeScene, refuge: updatedRefuge });
+    const newData = (useRPGStore.getState().refuges || []).map(r => r.id === updatedRefuge.id ? updatedRefuge : r);
+    updateCollection('refuges', newData);
+    await localDB.setItem('refuges', newData);
   };
 
   return (
@@ -709,18 +729,44 @@ export default function App() {
                     <div className="flex flex-col gap-8">
                       {(() => {
                         const renderCharacterCard = (npc) => {
-                          const isNpcActive = activeScene.npc?.id === npc.id;
-                          const displayImage = isNpcActive ? getAssetUrl(activeScene.npc.fileData) : getAssetUrl(npc.fileData);
+                          // Lógica inteligente: Verifica se o NPC está ativo no Refúgio ou na Cena Normal
+                          const isNpcActive = activeScene.refuge 
+                            ? activeScene.refugeNpcs?.some(n => n.id === npc.id)
+                            : activeScene.npc?.id === npc.id;
+                            
+                          const displayImage = (!activeScene.refuge && isNpcActive) ? getAssetUrl(activeScene.npc.fileData) : getAssetUrl(npc.fileData);
 
                           return (
                             <div key={npc.id} className="relative group h-40">
-                              <div onClick={() => updateSceneElement('npc', { ...npc, fileData: npc.fileData })} className={`cursor-pointer rounded-xl border-2 overflow-hidden bg-slate-800 w-full h-full relative ${isNpcActive ? 'border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'border-slate-700 hover:border-slate-500'}`}>
+                              <div 
+                                onClick={() => { 
+                                  // --- AQUI ESTÁ A MUDANÇA DO PONTO 4 ---
+                                  if (activeScene.refuge) {
+                                    let currentNpcs = activeScene.refugeNpcs || [];
+                                    const exists = currentNpcs.find(n => n.id === npc.id);
+                                    if (exists) {
+                                      // Se já está na tela, o clique REMOVE ele.
+                                      publishScene({ ...activeScene, refugeNpcs: currentNpcs.filter(n => n.id !== npc.id) });
+                                    } else if (currentNpcs.length < 4) {
+                                      // Se não está na tela e tem vaga, ADICIONA.
+                                      publishScene({ ...activeScene, refugeNpcs: [...currentNpcs, { ...npc, fileData: npc.fileData }] });
+                                    } else {
+                                      alert("O Refúgio suporta no máximo 4 personagens visíveis.");
+                                    }
+                                  } else {
+                                    // Comportamento normal se não houver refúgio ativo
+                                    updateSceneElement('npc', { ...npc, fileData: npc.fileData }); 
+                                  }
+                                }} 
+                                className={`cursor-pointer rounded-xl border-2 overflow-hidden bg-slate-800 w-full h-full relative ${isNpcActive ? 'border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'border-slate-700 hover:border-slate-500'}`}
+                              >
                                 <img src={displayImage} alt={npc.name} className="w-full h-full object-cover object-top opacity-70 group-hover:opacity-100 transition-all duration-300" />
                                 <div className="absolute bottom-0 w-full bg-gradient-to-t from-black to-transparent p-3 pt-6 pb-2">
                                   <h3 className="text-white text-sm font-bold truncate drop-shadow-md">{npc.name}</h3>
                                 </div>
                               </div>
                               
+                              {/* (O resto do renderCharacterCard continua igual com as variantes e botões de excluir/editar) */}
                               {npc.variants && npc.variants.length > 1 && (
                                 <div className="absolute bottom-1 right-2 flex gap-1 z-20">
                                   {npc.variants.map((vImg, idx) => (
@@ -728,10 +774,9 @@ export default function App() {
                                       key={idx}
                                       onClick={(e) => { 
                                         e.stopPropagation(); 
-                                        updateSceneElement('npc', { ...npc, fileData: vImg }); 
+                                        if(!activeScene.refuge) updateSceneElement('npc', { ...npc, fileData: vImg }); 
                                       }}
-                                      className={`w-5 h-5 md:w-6 md:h-6 rounded-full overflow-hidden border-2 cursor-pointer transition-transform hover:scale-125 bg-slate-900 ${isNpcActive && activeScene.npc.fileData === vImg ? 'border-amber-500 scale-110 shadow-lg' : 'border-slate-400/50 hover:border-white'}`}
-                                      title={`Expressão ${idx + 1}`}
+                                      className={`w-5 h-5 md:w-6 md:h-6 rounded-full overflow-hidden border-2 cursor-pointer transition-transform hover:scale-125 bg-slate-900 ${!activeScene.refuge && isNpcActive && activeScene.npc.fileData === vImg ? 'border-amber-500 scale-110 shadow-lg' : 'border-slate-400/50 hover:border-white'}`}
                                     >
                                       <img src={getAssetUrl(vImg)} className="w-full h-full object-cover object-top" alt="var" />
                                     </div>
@@ -740,27 +785,9 @@ export default function App() {
                               )}
 
                               <div className="absolute top-2 right-2 flex flex-col gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-30">
-                                <button 
-                                  onClick={(e) => { e.stopPropagation(); quickAddToCombat(npc); }} 
-                                  title="Adicionar Rápido à Iniciativa"
-                                  className="p-1.5 bg-red-600/90 text-white rounded-lg hover:bg-red-500 shadow-lg flex items-center justify-center border border-red-400/50"
-                                >
-                                  <Plus className="w-4 h-4" />
-                                </button>
-                                <button 
-                                  onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'npc', data: npc }); }} 
-                                  title="Editar Personagem"
-                                  className="p-1.5 bg-blue-900/90 text-white rounded-lg hover:bg-blue-600 shadow-lg flex items-center justify-center border border-blue-700 transition-colors"
-                                >
-                                  <Pencil className="w-3.5 h-3.5" />
-                                </button>
-                                <button 
-                                  onClick={(e) => { e.stopPropagation(); deleteAsset('npcs', npc.id); }} 
-                                  title="Excluir Personagem"
-                                  className="p-1.5 bg-slate-900/90 text-slate-400 rounded-lg hover:bg-slate-700 hover:text-white shadow-lg flex items-center justify-center border border-slate-700 transition-colors"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
+                                <button onClick={(e) => { e.stopPropagation(); quickAddToCombat(npc); }} className="p-1.5 bg-red-600/90 text-white rounded-lg hover:bg-red-500 shadow-lg flex items-center justify-center border border-red-400/50"><Plus className="w-4 h-4" /></button>
+                                <button onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'npc', data: npc }); }} className="p-1.5 bg-blue-900/90 text-white rounded-lg hover:bg-blue-600 shadow-lg flex items-center justify-center border border-blue-700 transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
+                                <button onClick={(e) => { e.stopPropagation(); deleteAsset('npcs', npc.id); }} className="p-1.5 bg-slate-900/90 text-slate-400 rounded-lg hover:bg-slate-700 hover:text-white shadow-lg flex items-center justify-center border border-slate-700 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
                               </div>
                             </div>
                           );
@@ -886,6 +913,100 @@ export default function App() {
                         </div>
                       ))}
                     </div>
+                  </section>
+                  {/* --- SEÇÃO REFÚGIOS --- */}
+                  <section>
+                    <div className="flex items-center justify-between border-b border-slate-700 pb-2 mb-4">
+                      <div className="flex items-center gap-4">
+                        <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                          <Shield className="w-5 h-5 text-indigo-400" /> Refúgios & Acampamentos
+                        </h2>
+                        <button onClick={() => setModalState({ isOpen: true, type: 'refuge', data: null })} className="bg-slate-800 hover:bg-slate-700 text-xs px-2 py-1 rounded text-indigo-400 flex items-center gap-1 border border-slate-700">
+                          <Upload className="w-3 h-3" /> Novo Refúgio
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 mb-4">
+                      <div onClick={() => publishScene({ ...activeScene, refuge: null, refugeNpcs: [] })} className="cursor-pointer rounded-xl border-2 p-4 flex flex-col items-center justify-center bg-slate-800 h-28 border-slate-700 hover:border-slate-500">
+                         <Home className="w-6 h-6 text-slate-500 mb-2" />
+                         <span className="text-slate-400 text-xs">Desativar Refúgio</span>
+                      </div>
+                      
+                      {displayRefuges.map(ref => (
+                        <div key={ref.id} className="relative group h-28">
+                          <div onClick={() => publishScene({ ...activeScene, refuge: ref, location: null, shop: null, isMapMode: false })} className={`cursor-pointer rounded-xl border-2 overflow-hidden w-full h-full relative ${activeScene.refuge?.id === ref.id ? 'border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.3)]' : 'border-slate-700 hover:border-slate-500'}`}>
+                            <img src={getAssetUrl(ref.fileData) || '/refugio-padrao.jpg'} alt={ref.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform opacity-60"/>
+                            <div className="absolute inset-0 flex items-end p-2 bg-gradient-to-t from-black/80 to-transparent"><span className="text-indigo-300 font-bold text-sm truncate">{ref.name}</span></div>
+                          </div>
+                          <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 z-10">
+                            <button onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'refuge', data: ref }); }} className="p-1.5 bg-blue-900/90 text-white rounded"><Pencil className="w-4 h-4" /></button>
+                            <button onClick={(e) => { e.stopPropagation(); deleteAsset('refuges', ref.id); }} className="p-1.5 bg-red-900/90 text-white rounded"><Trash2 className="w-4 h-4" /></button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* HUD DO MESTRE (Só aparece quando o Refúgio está ativo) */}
+                    {activeScene.refuge && activeScene.refuge.stats && (
+                      <div className="bg-slate-950 border border-indigo-900/50 p-4 rounded-xl shadow-inner animate-fade-in-up mb-8">
+                        <div className="flex justify-between items-center mb-4 border-b border-indigo-900/30 pb-2">
+                          <h3 className="text-indigo-400 font-bold tracking-widest uppercase text-sm">Controle Geral do Refúgio</h3>
+                          <span className="text-xs text-slate-500">Selecione NPCs na aba abaixo para exibi-los no refúgio ({activeScene.refugeNpcs?.length || 0}/4)</span>
+                        </div>
+                        
+                        {/* Níveis Básicos */}
+                        <div className="grid grid-cols-3 gap-4 mb-6">
+                          {['level', 'population', 'structures'].map((key, i) => (
+                            <div key={key} className="flex items-center justify-between bg-slate-900 px-3 py-2 rounded border border-slate-800">
+                              <span className="text-xs font-bold text-slate-400 uppercase">{['Nível', 'População', 'Construções'][i]}</span>
+                              <input type="number" min="0" value={activeScene.refuge[key]} onChange={(e) => handleRefugeStatUpdate(key, e.target.value)} className="w-16 bg-black border border-slate-700 rounded text-center text-indigo-300 font-bold" />
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Categorias */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[10px] text-amber-500 uppercase font-bold tracking-widest">Moral</label>
+                            <select value={activeScene.refuge.stats.moral} onChange={(e) => handleRefugeStatUpdate('stats.moral', e.target.value)} className="bg-black border border-slate-800 rounded p-1.5 text-xs text-slate-300">
+                              {['0 - Amotinada', '1 - Desiludida', '2 - Hesitante', '3 - Resoluta', '4 - Animada', '5 - Empenhada', '6 - Exaltada'].map((opt, i) => <option key={i} value={i}>{opt}</option>)}
+                            </select>
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[10px] text-blue-500 uppercase font-bold tracking-widest">Defesa</label>
+                            <select value={activeScene.refuge.stats.defesa} onChange={(e) => handleRefugeStatUpdate('stats.defesa', e.target.value)} className="bg-black border border-slate-800 rounded p-1.5 text-xs text-slate-300">
+                              {['0 - Nenhuma', '1 - Linhas e sinos', '2 - Arame farpado', '3 - Muro de madeira', '4 - Muro de pedra/tijolo', '5 - Complexo prisional', '6 - Base militar'].map((opt, i) => <option key={i} value={i}>{opt}</option>)}
+                            </select>
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            <label className="text-[10px] text-red-500 uppercase font-bold tracking-widest">Beligerância</label>
+                            <select value={activeScene.refuge.stats.beligerancia} onChange={(e) => handleRefugeStatUpdate('stats.beligerancia', e.target.value)} className="bg-black border border-slate-800 rounded p-1.5 text-xs text-slate-300">
+                              {['0 - Pacifista', '1 - Mínima', '2 - Razoável', '3 - Eficiente', '4 - Ameaçadora', '5 - Terrível', '6 - Arrasadora'].map((opt, i) => <option key={i} value={i}>{opt}</option>)}
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Recursos */}
+                        <label className="text-[10px] text-emerald-500 uppercase font-bold tracking-widest border-b border-emerald-900/30 w-full block pb-1 mb-3">Gestão de Recursos</label>
+                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                          {[
+                            { k: 'agua', n: 'Água' }, { k: 'plantas', n: 'Plantas' }, { k: 'animais', n: 'Animais' }, { k: 'madeira', n: 'Madeira' },
+                            { k: 'minerais', n: 'Minerais' }, { k: 'biomassa', n: 'Biomassa' }, { k: 'alimento', n: 'Alimento' }, { k: 'vestuario', n: 'Vestuário' },
+                            { k: 'municao', n: 'Munição' }, { k: 'combustivel', n: 'Combustível' }, { k: 'medicamento', n: 'Medicamento' }, { k: 'material', n: 'Material Const.' }
+                          ].map(res => (
+                            <div key={res.k} className="bg-slate-900 border border-slate-800 rounded p-2 flex flex-col gap-1.5">
+                              <span className="text-[10px] text-slate-400 font-bold uppercase truncate">{res.n}</span>
+                              <div className="flex items-center gap-1">
+                                <input type="number" min="0" value={activeScene.refuge.stats.resources[res.k].cur} onChange={(e) => handleRefugeStatUpdate(null, e.target.value, true, res.k, 'cur')} className="w-full bg-black text-white text-xs border border-slate-700 rounded text-center p-0.5" />
+                                <span className="text-slate-600">/</span>
+                                <input type="number" min="1" value={activeScene.refuge.stats.resources[res.k].max} onChange={(e) => handleRefugeStatUpdate(null, e.target.value, true, res.k, 'max')} className="w-full bg-black text-slate-400 text-xs border border-slate-700 rounded text-center p-0.5" />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </section>
 
                   {/* --- SEÇÃO INICIATIVA & COMBATE --- */}

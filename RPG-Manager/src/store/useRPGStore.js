@@ -13,11 +13,11 @@ export const useRPGStore = create((set, get) => ({
   
   // ARQUIVOS DO BANCO DE DADOS
   campaigns: [], locations: [], npcs: [], tracks: [], 
-  combatants: [], cutscenes: [], handouts: [], shops: [],
+  combatants: [], cutscenes: [], handouts: [], shops: [], refuges: [],
 
   // A CENA ATUAL (SINCRONIZADA)
   activeScene: {
-    location: null, npc: null, hideNpcName: false, isMapMode: false,
+    location: null, refuge: null, npc: null, hideNpcName: false, isMapMode: false,
     cutscene: null, handout: null, shop: null,
     audio: { trackId: null, loop: true, seekEvent: null },
     ambient: { trackId: null, loop: true }
@@ -42,6 +42,7 @@ export const useRPGStore = create((set, get) => ({
     set({
       campaigns: dbCampaigns,
       locations: await localDB.getItem('locations') || [],
+      refuges: await localDB.getItem('refuges') || [],
       npcs: await localDB.getItem('npcs') || [],
       tracks: await localDB.getItem('tracks') || [],
       combatants: await localDB.getItem('combatants') || [],

@@ -68,7 +68,7 @@ export const localDB = {
 };
 
 export const getAllDataForBackup = async () => {
-  const keys = ['campaigns', 'locations', 'npcs', 'tracks', 'rpg-active-scene', 'combatants', 'combat-state', 'cutscenes', 'handouts', 'shops'];
+  const keys = ['campaigns', 'locations', 'refuges', 'npcs', 'tracks', 'rpg-active-scene', 'combatants', 'combat-state', 'cutscenes', 'handouts', 'shops'];
   const backup = {};
   for (const key of keys) {
     const items = await localDB.getItem(key) || [];
@@ -91,7 +91,7 @@ export const getAllDataForBackup = async () => {
 };
 
 export const importBackup = async (backupData) => {
-  const keys = ['campaigns', 'locations', 'npcs', 'tracks', 'rpg-active-scene', 'combatants', 'combat-state', 'cutscenes', 'handouts', 'shops'];
+  const keys = ['campaigns', 'locations', 'refuges', 'npcs', 'tracks', 'rpg-active-scene', 'combatants', 'combat-state', 'cutscenes', 'handouts', 'shops'];
   for (const key of keys) {
     if (backupData[key]) {
       await localDB.setItem(key, backupData[key]);
