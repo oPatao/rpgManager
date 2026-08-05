@@ -1,4 +1,3 @@
-// src/services/db.js
 const DB_NAME = 'RPG-Manager-DB';
 const STORE_NAME = 'assets_store';
 
@@ -17,6 +16,7 @@ const initDB = () => {
 };
 
 const urlCache = new WeakMap();
+const blobKeyCache = new Map();
 
 export const getAssetUrl = (fileData) => {
   if (!fileData) return null;
@@ -24,12 +24,24 @@ export const getAssetUrl = (fileData) => {
   if (typeof fileData === 'string') return fileData; 
   
   if (fileData instanceof Blob || fileData instanceof File) {
-    // Se já criamos uma URL para este arquivo, reaproveita
+    // Se já criamos uma URL para esta exata referência, reaproveita
     if (urlCache.has(fileData)) return urlCache.get(fileData);
     
+    // Cache secundário por assinatura do Blob (tamanho, tipo, nome, timestamp)
+    // Isso garante que mesmo que o Blob seja reconstruído via structuredClone/BroadcastChannel/IndexedDB, a URL será a mesma
+    const cacheKey = `${fileData.size}_${fileData.type}_${fileData.name || ''}_${fileData.lastModified || 0}`;
+    if (cacheKey && blobKeyCache.has(cacheKey)) {
+      const cachedUrl = blobKeyCache.get(cacheKey);
+      urlCache.set(fileData, cachedUrl);
+      return cachedUrl;
+    }
+
     // Cria um link temporário direto na memória RAM do navegador
     const url = URL.createObjectURL(fileData);
     urlCache.set(fileData, url);
+    if (cacheKey) {
+      blobKeyCache.set(cacheKey, url);
+    }
     return url;
   }
   return null;
@@ -109,5 +121,3 @@ export const fileToDataUrl = (file) => {
     reader.readAsDataURL(file);
   });
 };
-
-

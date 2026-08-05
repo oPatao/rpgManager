@@ -15,14 +15,28 @@ export const useKeyboardShortcuts = () => {
     if (role !== 'master') return;
 
     const clearNPCsFromScene = async () => {
-      const npcs = activeScene.npcs || [];
-      if (npcs.length === 0) return;
-      const fading = npcs.map(n => ({ ...n, isFadingOut: true }));
-      await publishScene({ ...activeScene, npcs: fading });
-      setTimeout(async () => {
-        const current = useRPGStore.getState().activeScene;
-        await publishScene({ ...current, npcs: [] });
-      }, 500);
+      const isRefuge = !!activeScene.refuge;
+      const currentNpcs = isRefuge 
+        ? (activeScene.refugeNpcs || [])
+        : (Array.isArray(activeScene.npcs) && activeScene.npcs.length > 0 ? activeScene.npcs : (activeScene.npc ? [activeScene.npc] : []));
+
+      if (currentNpcs.length === 0) return;
+
+      const fading = currentNpcs.map(n => ({ ...n, isFadingOut: true }));
+
+      if (isRefuge) {
+        await publishScene({ ...activeScene, refugeNpcs: fading });
+        setTimeout(async () => {
+          const current = useRPGStore.getState().activeScene;
+          await publishScene({ ...current, refugeNpcs: [] });
+        }, 500);
+      } else {
+        await publishScene({ ...activeScene, npcs: fading, npc: null });
+        setTimeout(async () => {
+          const current = useRPGStore.getState().activeScene;
+          await publishScene({ ...current, npcs: [], npc: null });
+        }, 500);
+      }
     };
 
     const transitionTrack = () => {
@@ -63,6 +77,12 @@ export const useKeyboardShortcuts = () => {
         case 'c':
           e.preventDefault();
           clearNPCsFromScene();
+          break;
+        case 'i':
+          e.preventDefault();
+          if (activeScene.handout) {
+            publishScene({ ...activeScene, handout: null });
+          }
           break;
         case 'm':
           e.preventDefault();
@@ -111,6 +131,7 @@ export const KeyboardShortcutsHelpModal = ({ isOpen, onClose }) => {
   const shortcuts = [
     { key: '1 - 5', desc: 'Navegar entre as Abas do Menu' },
     { key: 'C', desc: 'Limpar NPCs da cena (com fade out)' },
+    { key: 'I', desc: 'Esconder Item / Documento em tela' },
     { key: 'M', desc: 'Próxima música / Trilha sonora' },
     { key: 'A', desc: 'Ligar / Desligar Som Ambiente' },
     { key: 'Esc', desc: 'Fechar Modais e Fichas' },

@@ -18,14 +18,40 @@ import { KeyboardShortcuts } from './components/KeyboardShortcuts';
 // O Zustand Store
 import { useRPGStore } from './store/useRPGStore';
 
-// --- GERENCIADOR DE ÁUDIO INVISÍVEL ---
+const AudioTrackSeeker = ({ activeScene, publishAudioOnly }) => {
+  const audioProgress = useRPGStore(state => state.audioProgress);
+  const setAudioProgress = useRPGStore(state => state.setAudioProgress);
+
+  const handleSeekChange = (e) => setAudioProgress({ ...audioProgress, time: Number(e.target.value) });
+  const handleSeekCommit = (e) => publishAudioOnly({ ...activeScene.audio, seekEvent: Number(e.target.value) }, undefined);
+
+  if (!activeScene.audio?.trackId) return null;
+
+  return (
+    <div className="mt-2 flex items-center gap-4 text-sm text-slate-300 bg-slate-900 p-3 rounded-xl border border-slate-800 shadow-inner">
+      <Clock className="w-4 h-4 text-slate-500" />
+      <span className="w-12 text-right text-xs font-mono font-bold tracking-wider text-purple-400">{formatTime(audioProgress.time)}</span>
+      <input 
+        type="range" 
+        min="0" 
+        max={audioProgress.duration || 100} 
+        value={audioProgress.time || 0} 
+        onChange={handleSeekChange} 
+        onMouseUp={handleSeekCommit} 
+        onTouchEnd={handleSeekCommit} 
+        className="flex-1 accent-purple-500 cursor-pointer h-2 bg-black rounded-lg appearance-none border border-slate-800" 
+      />
+      <span className="w-12 text-xs font-mono tracking-wider text-slate-500">{formatTime(audioProgress.duration)}</span>
+    </div>
+  );
+};
 
 export default function App() {
-  // Puxa as variáveis do Zustand
+  // Puxa as variáveis do Zustand (sem audioProgress para evitar re-renders globais a cada 1 seg)
   const {
     role, isLoading, setRole, activeCampaignId, setActiveCampaignId,
     campaigns, locations, npcs, tracks, combatants, cutscenes, handouts, shops,
-    activeScene, queuedTrackId, setQueuedTrackId, audioProgress, setAudioProgress,
+    activeScene, queuedTrackId, setQueuedTrackId,
     combatState, loadData, publishScene, deleteAsset, setModalState, setSheetModalState, updateCollection,
     conflicts, activeConflict, saveConflict, deleteConflict, startConflict, endConflict, updateActiveConflict,
     partyTrackerState, toggleNPCParty, uiState,
@@ -81,7 +107,14 @@ export default function App() {
 
   // --- FUNÇÕES DE CONTROLE DO MESTRE ---
   const updateSceneElement = (type, item) => {
-    if (item && (type === 'location' || type === 'npc')) {
+    if (type === 'location') {
+      if (item) {
+        const { secretNotes, ...publicItem } = item;
+        publishScene({ ...activeScene, location: publicItem, refuge: null, shop: null });
+      } else {
+        publishScene({ ...activeScene, location: null, refuge: null });
+      }
+    } else if (item && type === 'npc') {
       const { secretNotes, ...publicItem } = item;
       publishScene({ ...activeScene, [type]: publicItem });
     } else {
@@ -132,8 +165,6 @@ export default function App() {
   const toggleLoop = (e) => publishAudioOnly({ ...activeScene.audio, loop: e.target.checked }, undefined);
   const stopAudio = () => { publishAudioOnly({ ...activeScene.audio, trackId: null, seekEvent: null }, undefined); setQueuedTrackId(null); };
   const executeTransition = () => { if (queuedTrackId) { publishAudioOnly({ ...activeScene.audio, trackId: queuedTrackId, seekEvent: 0 }, undefined); setQueuedTrackId(null); } };
-  const handleSeekChange = (e) => setAudioProgress({ ...audioProgress, time: Number(e.target.value) });
-  const handleSeekCommit = (e) => publishAudioOnly({ ...activeScene.audio, seekEvent: Number(e.target.value) }, undefined);
 
   // --- CONTROLES DE SOM AMBIENTE ---
   const handleAmbientVolumeChange = (e) => {
@@ -339,7 +370,7 @@ export default function App() {
     <div className="min-h-screen bg-slate-900 text-slate-200 flex flex-col h-screen overflow-hidden">
       {role === 'master' && (
         <>
-          <AudioManager audioState={activeScene.audio} setAudioProgress={setAudioProgress} tracksList={tracks} />
+          <AudioManager audioState={activeScene.audio} setAudioProgress={useRPGStore.getState().setAudioProgress} tracksList={tracks} />
           <AmbientManager ambientState={activeScene.ambient} tracksList={tracks} />
           <PartyTracker />
           <KeyboardShortcuts />
@@ -557,14 +588,7 @@ export default function App() {
                           })}
                         </div>
 
-                        {activeScene.audio?.trackId && (
-                          <div className="mt-2 flex items-center gap-4 text-sm text-slate-300 bg-slate-900 p-3 rounded-xl border border-slate-800 shadow-inner">
-                            <Clock className="w-4 h-4 text-slate-500" />
-                            <span className="w-12 text-right text-xs font-mono font-bold tracking-wider text-purple-400">{formatTime(audioProgress.time)}</span>
-                            <input type="range" min="0" max={audioProgress.duration || 100} value={audioProgress.time || 0} onChange={handleSeekChange} onMouseUp={handleSeekCommit} onTouchEnd={handleSeekCommit} className="flex-1 accent-purple-500 cursor-pointer h-2 bg-black rounded-lg appearance-none border border-slate-800" />
-                            <span className="w-12 text-xs font-mono tracking-wider text-slate-500">{formatTime(audioProgress.duration)}</span>
-                          </div>
-                        )}
+                        <AudioTrackSeeker activeScene={activeScene} publishAudioOnly={publishAudioOnly} />
                       </section>
                     </div>
                   )}
@@ -684,7 +708,7 @@ export default function App() {
                         </div>
                         
                         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-                          <div onClick={() => publishScene({ ...activeScene, shop: null })} className="cursor-pointer rounded-xl border-2 p-4 flex flex-col items-center justify-center bg-slate-800 h-24 border-slate-700 hover:border-slate-500 transition-colors">
+                          <div onClick={() => publishScene({ ...activeScene, shop: null, npc: activeScene.npcs?.[0] || null })} className="cursor-pointer rounded-xl border-2 p-4 flex flex-col items-center justify-center bg-slate-800 h-24 border-slate-700 hover:border-slate-500 transition-colors">
                              <Store className="w-6 h-6 text-slate-500 mb-2" />
                              <span className="text-slate-400 text-xs text-center font-medium">Fechar Loja</span>
                           </div>
@@ -786,9 +810,11 @@ export default function App() {
 
                     {/* --- PAINEL DE CONTROLADORES DE NPCs ATIVOS NA CENA --- */}
                     {(() => {
-                      const rawNpcs = Array.isArray(activeScene.npcs) 
-                        ? activeScene.npcs 
-                        : (activeScene.npc ? [activeScene.npc] : []);
+                      const rawNpcs = activeScene.refuge
+                        ? (activeScene.refugeNpcs || [])
+                        : (Array.isArray(activeScene.npcs) 
+                            ? activeScene.npcs 
+                            : (activeScene.npc ? [activeScene.npc] : []));
                       const activeSceneNpcs = rawNpcs.filter(n => !n.isFadingOut);
 
                       return (
@@ -797,7 +823,7 @@ export default function App() {
                             <div className="flex items-center gap-2">
                               <Users className="w-5 h-5 text-amber-500" />
                               <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">
-                                NPCs na Cena ({activeSceneNpcs.length}/4)
+                                NPCs na Cena ({activeSceneNpcs.length}/4) {activeScene.refuge ? <span className="text-indigo-400 text-xs font-semibold">(Refúgio Ativo)</span> : ''}
                               </h3>
                             </div>
                             {activeSceneNpcs.length >= 4 && (
@@ -905,19 +931,19 @@ export default function App() {
                     
                     <div className="flex flex-col gap-8">
                       {(() => {
-                        const rawNpcsList = Array.isArray(activeScene.npcs) 
-                          ? activeScene.npcs 
-                          : (activeScene.npc ? [activeScene.npc] : []);
+                        const rawNpcsList = activeScene.refuge 
+                          ? (activeScene.refugeNpcs || [])
+                          : (Array.isArray(activeScene.npcs) 
+                              ? activeScene.npcs 
+                              : (activeScene.npc ? [activeScene.npc] : []));
                         const currentActiveNpcs = rawNpcsList.filter(n => !n.isFadingOut);
 
                         const renderCharacterCard = (npc) => {
-                          const isNpcActive = activeScene.refuge 
-                            ? activeScene.refugeNpcs?.some(n => n.id === npc.id)
-                            : currentActiveNpcs.some(n => n.id === npc.id);
+                          const isNpcActive = currentActiveNpcs.some(n => n.id === npc.id);
 
                           const activeSceneItem = currentActiveNpcs.find(n => n.id === npc.id);
                           const currentVariantIndex = activeSceneItem?.variantIndex || 0;
-                          const displayImage = (!activeScene.refuge && isNpcActive && npc.variants?.[currentVariantIndex]) 
+                          const displayImage = (isNpcActive && npc.variants?.[currentVariantIndex]) 
                             ? getAssetUrl(npc.variants[currentVariantIndex]) 
                             : getAssetUrl(npc.fileData);
 
@@ -925,25 +951,13 @@ export default function App() {
                             <div key={npc.id} className="relative group h-40">
                               <div 
                                 onClick={() => { 
-                                  if (activeScene.refuge) {
-                                    let currentNpcs = activeScene.refugeNpcs || [];
-                                    const exists = currentNpcs.find(n => n.id === npc.id);
-                                    if (exists) {
-                                      publishScene({ ...activeScene, refugeNpcs: currentNpcs.filter(n => n.id !== npc.id) });
-                                    } else if (currentNpcs.length < 4) {
-                                      publishScene({ ...activeScene, refugeNpcs: [...currentNpcs, { ...npc, fileData: npc.fileData }] });
-                                    } else {
-                                      alert("O Refúgio suporta no máximo 4 personagens visíveis.");
-                                    }
+                                  if (isNpcActive) {
+                                    removeNPCFromScene(npc.id);
                                   } else {
-                                    if (isNpcActive) {
-                                      removeNPCFromScene(npc.id);
+                                    if (currentActiveNpcs.length >= 4) {
+                                      alert("Limite de 4 NPCs na cena atingido!");
                                     } else {
-                                      if (currentActiveNpcs.length >= 4) {
-                                        alert("Limite de 4 NPCs na cena atingido!");
-                                      } else {
-                                        addNPCToScene(npc);
-                                      }
+                                      addNPCToScene(npc);
                                     }
                                   }
                                 }} 
@@ -953,7 +967,7 @@ export default function App() {
                                 <div className="absolute bottom-0 w-full bg-gradient-to-t from-black to-transparent p-3 pt-6 pb-2">
                                   <h3 className="text-white text-sm font-bold truncate drop-shadow-md">{npc.name}</h3>
                                 </div>
-                                {isNpcActive && !activeScene.refuge && (
+                                {isNpcActive && (
                                   <div className="absolute top-2 left-2 bg-amber-500 text-slate-950 text-[10px] font-black px-1.5 py-0.5 rounded shadow">
                                     Na Cena
                                   </div>
@@ -967,11 +981,11 @@ export default function App() {
                                       key={idx}
                                       onClick={(e) => { 
                                         e.stopPropagation(); 
-                                        if(!activeScene.refuge && isNpcActive) {
+                                        if (isNpcActive) {
                                           switchNPCVariant(npc.id, idx);
                                         }
                                       }}
-                                      className={`w-5 h-5 md:w-6 md:h-6 rounded-full overflow-hidden border-2 cursor-pointer transition-transform hover:scale-125 bg-slate-900 ${!activeScene.refuge && isNpcActive && currentVariantIndex === idx ? 'border-amber-500 scale-110 shadow-lg' : 'border-slate-400/50 hover:border-white'}`}
+                                      className={`w-5 h-5 md:w-6 md:h-6 rounded-full overflow-hidden border-2 cursor-pointer transition-transform hover:scale-125 bg-slate-900 ${isNpcActive && currentVariantIndex === idx ? 'border-amber-500 scale-110 shadow-lg' : 'border-slate-400/50 hover:border-white'}`}
                                     >
                                       <img src={getAssetUrl(vImg)} className="w-full h-full object-cover object-top" alt="var" />
                                     </div>
@@ -1145,7 +1159,7 @@ export default function App() {
                     </div>
                     
                     <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 mb-4">
-                      <div onClick={() => publishScene({ ...activeScene, refuge: null, refugeNpcs: [] })} className="cursor-pointer rounded-xl border-2 p-4 flex flex-col items-center justify-center bg-slate-800 h-28 border-slate-700 hover:border-slate-500">
+                      <div onClick={() => publishScene({ ...activeScene, refuge: null, refugeNpcs: [], npc: activeScene.npcs?.[0] || null })} className="cursor-pointer rounded-xl border-2 p-4 flex flex-col items-center justify-center bg-slate-800 h-28 border-slate-700 hover:border-slate-500">
                          <Home className="w-6 h-6 text-slate-500 mb-2" />
                          <span className="text-slate-400 text-xs">Desativar Refúgio</span>
                       </div>
@@ -1157,7 +1171,7 @@ export default function App() {
 
                         return (
                           <div key={ref.id} className="relative group h-28">
-                            <div onClick={() => publishScene({ ...activeScene, refuge: ref, location: null, shop: null, isMapMode: false })} className={`cursor-pointer rounded-xl border-2 overflow-hidden w-full h-full relative ${activeScene.refuge?.id === ref.id ? 'border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.3)]' : 'border-slate-700 hover:border-slate-500'}`}>
+                            <div onClick={() => publishScene({ ...activeScene, refuge: ref, location: null, shop: null, npc: null, isMapMode: false })} className={`cursor-pointer rounded-xl border-2 overflow-hidden w-full h-full relative ${activeScene.refuge?.id === ref.id ? 'border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.3)]' : 'border-slate-700 hover:border-slate-500'}`}>
                               <img src={getAssetUrl(bgData) || '/refugio-padrao.jpg'} alt={ref.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform opacity-60"/>
                               <div className="absolute inset-0 flex items-end p-2 bg-gradient-to-t from-black/80 to-transparent"><span className="text-indigo-300 font-bold text-sm truncate">{ref.name}</span></div>
                             </div>

@@ -237,13 +237,7 @@ export const useRPGStore = create((set, get) => ({
   // FUNÇÕES DE GERENCIAMENTO DE NPCs NA CENA
   addNPCToScene: async (npcData) => {
     const activeScene = get().activeScene || {};
-    const rawNpcs = Array.isArray(activeScene.npcs) 
-      ? activeScene.npcs 
-      : (activeScene.npc ? [activeScene.npc] : []);
-
-    // Remove qualquer versão fadingOut antiga ou duplicada deste mesmo NPC
-    const currentNpcs = rawNpcs.filter(n => !n.isFadingOut && n.id !== npcData.id);
-    if (currentNpcs.length >= 4) return; // máximo 4
+    const isRefuge = !!activeScene.refuge;
 
     const newNPC = {
       id: npcData.id,
@@ -257,19 +251,55 @@ export const useRPGStore = create((set, get) => ({
       isHidden: false,
       isFadingOut: false
     };
+
+    if (isRefuge) {
+      const currentRefugeNpcs = activeScene.refugeNpcs || [];
+      const filtered = currentRefugeNpcs.filter(n => !n.isFadingOut && n.id !== npcData.id);
+      if (filtered.length >= 4) return;
+      const newRefugeNpcs = [...filtered, newNPC];
+      await get().publishScene({ ...activeScene, refugeNpcs: newRefugeNpcs });
+      return;
+    }
+
+    const rawNpcs = Array.isArray(activeScene.npcs) 
+      ? activeScene.npcs 
+      : (activeScene.npc ? [activeScene.npc] : []);
+
+    const currentNpcs = rawNpcs.filter(n => !n.isFadingOut && n.id !== npcData.id);
+    if (currentNpcs.length >= 4) return; // máximo 4
+
     const newNpcs = [...currentNpcs, newNPC];
     await get().publishScene({ ...activeScene, npcs: newNpcs, npc: newNpcs[0] || null });
   },
 
   removeNPCFromScene: async (npcId) => {
     const activeScene = get().activeScene || {};
+    const isRefuge = !!activeScene.refuge;
+
+    if (isRefuge) {
+      const rawNpcs = activeScene.refugeNpcs || [];
+      if (!rawNpcs.some(n => n.id === npcId)) return;
+
+      const fadingNpcs = rawNpcs.map(n =>
+        n.id === npcId ? { ...n, isFadingOut: true } : n
+      );
+      await get().publishScene({ ...activeScene, refugeNpcs: fadingNpcs });
+
+      setTimeout(async () => {
+        const current = get().activeScene || {};
+        const currentList = current.refugeNpcs || [];
+        const filteredNpcs = currentList.filter(n => n.id !== npcId);
+        await get().publishScene({ ...current, refugeNpcs: filteredNpcs });
+      }, 500);
+      return;
+    }
+
     const rawNpcs = Array.isArray(activeScene.npcs) 
       ? activeScene.npcs 
       : (activeScene.npc ? [activeScene.npc] : []);
 
     if (!rawNpcs.some(n => n.id === npcId)) return;
 
-    // Marca como fading out para animação suave de saída na tela do jogador
     const fadingNpcs = rawNpcs.map(n =>
       n.id === npcId ? { ...n, isFadingOut: true } : n
     );
@@ -278,7 +308,6 @@ export const useRPGStore = create((set, get) => ({
 
     await get().publishScene({ ...activeScene, npcs: fadingNpcs, npc: primaryNpc });
 
-    // Remove do array definitivamente após 500ms
     setTimeout(async () => {
       const current = get().activeScene || {};
       const currentList = Array.isArray(current.npcs) 
@@ -292,6 +321,17 @@ export const useRPGStore = create((set, get) => ({
 
   toggleNPCHidden: async (npcId) => {
     const activeScene = get().activeScene || {};
+    const isRefuge = !!activeScene.refuge;
+
+    if (isRefuge) {
+      const rawNpcs = activeScene.refugeNpcs || [];
+      const updatedNpcs = rawNpcs.map(n =>
+        n.id === npcId ? { ...n, isHidden: !n.isHidden } : n
+      );
+      await get().publishScene({ ...activeScene, refugeNpcs: updatedNpcs });
+      return;
+    }
+
     const rawNpcs = Array.isArray(activeScene.npcs) 
       ? activeScene.npcs 
       : (activeScene.npc ? [activeScene.npc] : []);
@@ -303,6 +343,17 @@ export const useRPGStore = create((set, get) => ({
 
   switchNPCVariant: async (npcId, variantIndex) => {
     const activeScene = get().activeScene || {};
+    const isRefuge = !!activeScene.refuge;
+
+    if (isRefuge) {
+      const rawNpcs = activeScene.refugeNpcs || [];
+      const updatedNpcs = rawNpcs.map(n =>
+        n.id === npcId ? { ...n, variantIndex } : n
+      );
+      await get().publishScene({ ...activeScene, refugeNpcs: updatedNpcs });
+      return;
+    }
+
     const rawNpcs = Array.isArray(activeScene.npcs) 
       ? activeScene.npcs 
       : (activeScene.npc ? [activeScene.npc] : []);
@@ -314,6 +365,17 @@ export const useRPGStore = create((set, get) => ({
 
   toggleNPCName: async (npcId) => {
     const activeScene = get().activeScene || {};
+    const isRefuge = !!activeScene.refuge;
+
+    if (isRefuge) {
+      const rawNpcs = activeScene.refugeNpcs || [];
+      const updatedNpcs = rawNpcs.map(n =>
+        n.id === npcId ? { ...n, hideName: !n.hideName } : n
+      );
+      await get().publishScene({ ...activeScene, refugeNpcs: updatedNpcs });
+      return;
+    }
+
     const rawNpcs = Array.isArray(activeScene.npcs) 
       ? activeScene.npcs 
       : (activeScene.npc ? [activeScene.npc] : []);
