@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Monitor, Users, Map, User, EyeOff, Eye, Music, Play, Square, Repeat, FastForward, Clock, Plus, Trash2, Folder, X, Save, Upload, Wind, FileText, Store, Pencil, FolderOpen, ChevronLeft,Shield, Home, Battery } from 'lucide-react';
+import { Monitor, Users, Map, User, EyeOff, Eye, Music, Play, Square, Repeat, FastForward, Clock, Plus, Trash2, Folder, X, Save, Upload, Wind, FileText, Store, Pencil, FolderOpen, ChevronLeft,Shield, Home, Battery, RefreshCw, Tag } from 'lucide-react';
 
 // IMPORTAÇÃO CORRIGIDA: getAssetUrl adicionado!
 import { localDB, getAllDataForBackup, importBackup, generateId, fileToDataUrl, getAssetUrl } from './services/db';
@@ -7,6 +7,13 @@ import { AudioManager, formatTime } from './components/AudioManager';
 import { AmbientManager } from './components/AmbientManager';
 import { SceneRenderer } from './components/SceneRenderer';
 import { AssetModal } from './components/AssetModal';
+import { ConflictTracker } from './components/conflict/ConflictTracker';
+import { PictureInPicture } from './components/PictureInPicture';
+import { CharacterSheet } from './components/CharacterSheet';
+import { PartyTracker } from './components/PartyTracker';
+import { TopNav } from './components/TopNav';
+import { AudioBar } from './components/AudioBar';
+import { KeyboardShortcuts } from './components/KeyboardShortcuts';
 
 // O Zustand Store
 import { useRPGStore } from './store/useRPGStore';
@@ -19,7 +26,10 @@ export default function App() {
     role, isLoading, setRole, activeCampaignId, setActiveCampaignId,
     campaigns, locations, npcs, tracks, combatants, cutscenes, handouts, shops,
     activeScene, queuedTrackId, setQueuedTrackId, audioProgress, setAudioProgress,
-    combatState, loadData, publishScene, deleteAsset, setModalState, updateCollection
+    combatState, loadData, publishScene, deleteAsset, setModalState, setSheetModalState, updateCollection,
+    conflicts, activeConflict, saveConflict, deleteConflict, startConflict, endConflict, updateActiveConflict,
+    partyTrackerState, toggleNPCParty, uiState,
+    addNPCToScene, removeNPCFromScene, toggleNPCHidden, switchNPCVariant, toggleNPCName
   } = useRPGStore();
 
   // Carrega os dados na primeira vez
@@ -80,7 +90,7 @@ export default function App() {
   };
 
   const clearScene = () => {
-    publishScene({ location: null, npc: null, hideNpcName: false, isMapMode: false, cutscene: null, handout: null, shop: null, audio: { trackId: null, loop: true, seekEvent: null }, ambient: { trackId: null, loop: true } });
+    publishScene({ location: null, refuge: null, npc: null, npcs: [], hideNpcName: false, isMapMode: false, cutscene: null, handout: null, shop: null, audio: { trackId: null, loop: true, seekEvent: null }, ambient: { trackId: null, loop: true } });
     setQueuedTrackId(null);
   };
 
@@ -331,6 +341,9 @@ export default function App() {
         <>
           <AudioManager audioState={activeScene.audio} setAudioProgress={setAudioProgress} tracksList={tracks} />
           <AmbientManager ambientState={activeScene.ambient} tracksList={tracks} />
+          <PartyTracker />
+          <KeyboardShortcuts />
+          <AudioBar />
         </>
       )}
       <AssetModal />
@@ -343,7 +356,9 @@ export default function App() {
           </button>
         </div>
       ) : (
-        <>
+        <div className={`flex-1 flex flex-col h-screen overflow-hidden transition-all duration-300 ${
+          role === 'master' ? (partyTrackerState?.isCollapsed ? 'ml-12' : 'ml-[280px]') : 'ml-0'
+        }`}>
           {/* CABEÇALHO DO MESTRE */}
           <header className="bg-slate-950 border-b border-slate-800 p-4 flex flex-wrap justify-between items-center shadow-md z-10 gap-4">
             <div className="flex items-center gap-3">
@@ -378,9 +393,12 @@ export default function App() {
             </div>
           </header>
 
+          {/* MENU SUPERIOR COM TABS */}
+          {activeCampaignId && <TopNav />}
+
           <div className="flex-1 flex overflow-hidden">
             {/* PAINEL CENTRAL (CONTROLOS E ATIVOS) */}
-            <div className="flex-1 overflow-y-auto p-4 md:p-6 flex flex-col gap-8 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto p-4 md:p-6 flex flex-col gap-8 custom-scrollbar pb-28">
               
               {!activeCampaignId ? (
                 <div className="flex flex-col items-center justify-center h-full text-slate-500">
@@ -390,324 +408,364 @@ export default function App() {
                 </div>
               ) : (
                 <>
-                  {/* --- SEÇÃO ÁUDIO (DUPLA CAMADA + VOLUMES + TAGS) --- */}
-                  <section className="bg-slate-950 p-4 rounded-xl border border-slate-800 shadow-md flex flex-col gap-4">
-                    
-                    {/* Cabeçalho Geral de Upload */}
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                      <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-                        <Music className="w-5 h-5 text-purple-400" /> Gerenciador de Áudio
-                      </h2>
-                      <button 
-                        onClick={() => setModalState({ isOpen: true, type: 'track', data: null })}
-                        className="bg-slate-800 hover:bg-slate-700 text-xs px-2 py-1 rounded text-purple-400 flex items-center gap-1 border border-slate-700"
-                      >
-                        <Upload className="w-3 h-3" /> Fazer Upload de Áudio
-                      </button>
-                    </div>
-
-                    {/* SUB-PAINEL 1: CONTROLES DA TRILHA SONORA */}
-                    <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 flex flex-wrap justify-between items-center gap-2">
-                      <div className="flex items-center gap-2">
-                        <Play className="w-4 h-4 text-purple-400 fill-current" />
-                        <span className="text-xs font-bold uppercase tracking-wider text-slate-300">Trilha Principal:</span>
-                        <span className="text-xs text-purple-300 italic truncate max-w-[150px]">
-                          {tracks.find(t => t.id === activeScene.audio?.trackId)?.name || "Nenhuma tocando"}
-                        </span>
-                      </div>
-                      <div className="flex gap-4 items-center ml-auto">
-                        <div className="flex items-center gap-2 bg-slate-950/60 px-2 py-1 rounded border border-slate-800">
-                          <span className="text-[10px] text-slate-400 font-bold uppercase">Vol:</span>
-                          <input type="range" min="0" max="1" step="0.05" 
-                            value={activeScene.audio?.volume !== undefined ? activeScene.audio.volume : 1} 
-                            onChange={handleVolumeChange} 
-                            onMouseUp={handleVolumeCommit} 
-                            onTouchEnd={handleVolumeCommit} 
-                            className="w-16 md:w-24 accent-purple-500 h-1 bg-slate-800 rounded appearance-none cursor-pointer" />
-                        </div>
-
-                        {queuedTrackId && (
-                          <button onClick={executeTransition} className="bg-purple-600 hover:bg-purple-500 text-white px-3 py-1 rounded text-xs font-bold flex items-center gap-1 animate-pulse">
-                            <FastForward className="w-3 h-3 fill-current" /> Transicionar
-                          </button>
-                        )}
-                        <label className="flex items-center gap-1 text-xs text-slate-400 cursor-pointer hover:text-white">
-                          <input type="checkbox" checked={activeScene.audio?.loop} onChange={toggleLoop} className="accent-purple-500" />
-                          Loop
-                        </label>
-                        <button onClick={stopAudio} className="text-[10px] bg-slate-800 hover:bg-red-950 text-slate-300 py-1 px-2 rounded border border-slate-700">
-                          Parar Trilha
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* SUB-PAINEL 2: CONTROLES DO SOM AMBIENTE */}
-                    <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 flex flex-wrap justify-between items-center gap-2">
-                      <div className="flex items-center gap-2">
-                        <Wind className="w-4 h-4 text-emerald-400" />
-                        <span className="text-xs font-bold uppercase tracking-wider text-slate-300">Som Ambiente:</span>
-                        <span className="text-xs text-emerald-300 italic truncate max-w-[150px]">
-                          {tracks.find(t => t.id === activeScene.ambient?.trackId)?.name || "Nenhum ativo"}
-                        </span>
-                      </div>
-                      <div className="flex gap-4 items-center ml-auto">
-                        <div className="flex items-center gap-2 bg-slate-950/60 px-2 py-1 rounded border border-slate-800">
-                          <span className="text-[10px] text-slate-400 font-bold uppercase">Vol:</span>
-                          <input type="range" min="0" max="1" step="0.05" 
-                            value={activeScene.ambient?.volume !== undefined ? activeScene.ambient.volume : 0.6} 
-                            onChange={handleAmbientVolumeChange} 
-                            onMouseUp={handleAmbientVolumeCommit} 
-                            onTouchEnd={handleAmbientVolumeCommit} 
-                            className="w-16 md:w-24 accent-emerald-500 h-1 bg-slate-800 rounded appearance-none cursor-pointer" />
-                        </div>
-
-                        <label className="flex items-center gap-1 text-xs text-slate-400 cursor-pointer hover:text-white">
-                          <input type="checkbox" checked={activeScene.ambient?.loop} onChange={toggleAmbientLoop} className="accent-emerald-500" />
-                          Loop
-                        </label>
-                        <button onClick={stopAmbient} className="text-[10px] bg-slate-800 hover:bg-red-950 text-slate-300 py-1 px-2 rounded border border-slate-700">
-                          Parar Ambiente
-                        </button>
-                      </div>
-                    </div>
-
-                    {activeTracks.length === 0 && <p className="text-slate-500 text-sm italic py-2">Sem músicas ou ambientes. Faça upload de um MP3.</p>}
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                      {activeTracks.map(track => {
-                        const isPlayingTrack = activeScene.audio?.trackId === track.id;
-                        const isPlayingAmbient = activeScene.ambient?.trackId === track.id;
-                        const isQueued = queuedTrackId === track.id;
+                  {/* TAB 4: ÁUDIO */}
+                  {uiState?.activeTab === 'audio' && (
+                    <div className="tab-content flex flex-col gap-8">
+                      {/* --- SEÇÃO ÁUDIO (DUPLA CAMADA + VOLUMES + TAGS) --- */}
+                      <section className="bg-slate-950 p-4 rounded-xl border border-slate-800 shadow-md flex flex-col gap-4">
                         
-                        const trackTags = track.tags || [];
-                        const hasTag = (name) => trackTags.some(t => t.toLowerCase() === name.toLowerCase());
-
-                        let cardColorClass = 'border-slate-800 bg-slate-900/50 hover:border-slate-700';
-                        if (isPlayingTrack) cardColorClass = 'border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.15)] bg-slate-900';
-                        else if (isPlayingAmbient) cardColorClass = 'border-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.15)] bg-slate-900';
-                        else if (isQueued) cardColorClass = 'border-amber-500 border-dashed bg-slate-900';
-                        else if (hasTag('combate') || hasTag('batalha') || hasTag('boss')) cardColorClass = 'border-red-900/40 bg-red-950/10 hover:border-red-700/60';
-                        else if (hasTag('tranquila') || hasTag('calma') || hasTag('cidade')) cardColorClass = 'border-cyan-900/40 bg-cyan-950/10 hover:border-cyan-700/60';
-                        else if (hasTag('suspense') || hasTag('terror') || hasTag('caverna')) cardColorClass = 'border-orange-900/40 bg-orange-950/10 hover:border-orange-700/60';
-
-                        return (
-                          <div key={track.id} className={`relative group p-3 rounded-xl border flex flex-col gap-2 transition-all ${cardColorClass}`}>
-                            <div className="pr-6">
-                              <span className="font-medium text-xs text-slate-200 truncate block">{track.name}</span>
-                              {trackTags.length > 0 && (
-                                <div className="flex flex-wrap gap-1 mt-1">
-                                  {trackTags.map((tag, idx) => (
-                                    <span key={idx} className="text-[9px] px-1.5 py-0.5 rounded bg-slate-950/60 text-slate-400 border border-slate-800 uppercase tracking-tight font-semibold">
-                                      {tag}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                            
-                            <div className="flex gap-1.5 mt-auto pt-1">
-                              <button 
-                                onClick={() => { if (!isPlayingTrack) setQueuedTrackId(track.id); }}
-                                className={`flex-1 py-1 rounded text-[10px] font-bold transition-colors flex items-center justify-center gap-1
-                                  ${isPlayingTrack ? 'bg-purple-600 text-white' : 'bg-slate-800/80 hover:bg-purple-950 text-purple-400'}`}
-                              >
-                                <Play className="w-2.5 h-2.5 fill-current" /> Trilha
-                              </button>
-                              
-                              <button 
-                                onClick={() => playAmbient(track.id)}
-                                className={`flex-1 py-1 rounded text-[10px] font-bold transition-colors flex items-center justify-center gap-1
-                                  ${isPlayingAmbient ? 'bg-emerald-600 text-white' : 'bg-slate-800/80 hover:bg-emerald-950 text-emerald-400'}`}
-                              >
-                                <Wind className="w-2.5 h-2.5" /> Ambiente
-                              </button>
-                            </div>
-
-                            <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                              <button onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'track', data: track }); }} title="Editar Áudio" className="p-1.5 bg-blue-900/90 text-white rounded hover:bg-blue-600 transition-colors">
-                                <Pencil className="w-3 h-3" />
-                              </button>
-                              <button onClick={(e) => { e.stopPropagation(); deleteAsset('tracks', track.id); }} title="Excluir Áudio" className="p-1.5 bg-red-950 text-red-400 rounded hover:bg-red-600 hover:text-white transition-colors">
-                                <Trash2 className="w-3 h-3" />
-                              </button>
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-
-                    {activeScene.audio?.trackId && (
-                      <div className="mt-2 flex items-center gap-4 text-sm text-slate-300 bg-slate-900 p-3 rounded-xl border border-slate-800 shadow-inner">
-                        <Clock className="w-4 h-4 text-slate-500" />
-                        <span className="w-12 text-right text-xs font-mono font-bold tracking-wider text-purple-400">{formatTime(audioProgress.time)}</span>
-                        <input type="range" min="0" max={audioProgress.duration || 100} value={audioProgress.time || 0} onChange={handleSeekChange} onMouseUp={handleSeekCommit} onTouchEnd={handleSeekCommit} className="flex-1 accent-purple-500 cursor-pointer h-2 bg-black rounded-lg appearance-none border border-slate-800" />
-                        <span className="w-12 text-xs font-mono tracking-wider text-slate-500">{formatTime(audioProgress.duration)}</span>
-                      </div>
-                    )}
-                  </section>
-
-                  {/* --- SEÇÃO CENÁRIOS --- */}
-                  <section>
-                    <div className="flex items-center justify-between border-b border-slate-700 pb-2 mb-4">
-                      <div className="flex items-center gap-4">
-                        <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-                          <Map className="w-5 h-5 text-blue-400" /> Cenários
-                        </h2>
-                        <button 
-                          onClick={() => setModalState({ isOpen: true, type: 'location', data: null })}
-                          className="bg-slate-800 hover:bg-slate-700 text-xs px-2 py-1 rounded text-blue-400 flex items-center gap-1 border border-slate-700"
-                        >
-                          <Upload className="w-3 h-3" /> Fazer Upload
-                        </button>
-                      </div>
-                      <label className={`flex items-center gap-2 text-sm font-bold px-3 py-1.5 rounded cursor-pointer border transition-all ${activeScene.isMapMode ? 'bg-blue-600 text-white border-blue-500 shadow-[0_0_10px_rgba(37,99,235,0.4)]' : 'bg-blue-950/30 text-blue-400 border-blue-900/50 hover:bg-blue-900/40'}`}>
-                        <input 
-                          type="checkbox" 
-                          checked={activeScene.isMapMode || false} 
-                          onChange={(e) => publishScene({ ...activeScene, isMapMode: e.target.checked })} 
-                          className="hidden" 
-                        />
-                        <Map className="w-4 h-4" /> {activeScene.isMapMode ? 'Modo Mapa: ATIVO' : 'Modo Planta Baixa'}
-                      </label>
-                    </div>
-                    
-                    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-                      {/* Botão de Voltar da Pasta */}
-                      {activeFolderLocations && (
-                        <div className="col-span-full flex items-center gap-2 mb-2">
-                          <button onClick={() => setActiveFolderLocations('')} className="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-sm text-slate-300 flex items-center gap-1 transition-colors border border-slate-700">
-                            <ChevronLeft className="w-4 h-4"/> Voltar
+                        {/* Cabeçalho Geral de Upload */}
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                          <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                            <Music className="w-5 h-5 text-purple-400" /> Gerenciador de Áudio
+                          </h2>
+                          <button 
+                            onClick={() => setModalState({ isOpen: true, type: 'track', data: null })}
+                            className="bg-slate-800 hover:bg-slate-700 text-xs px-2 py-1 rounded text-purple-400 flex items-center gap-1 border border-slate-700"
+                          >
+                            <Upload className="w-3 h-3" /> Fazer Upload de Áudio
                           </button>
-                          <span className="text-slate-400 text-sm font-bold flex items-center gap-2">
-                            <FolderOpen className="w-4 h-4 text-blue-400" /> Pasta: {activeFolderLocations}
-                          </span>
                         </div>
-                      )}
 
-                      {!activeFolderLocations && (
-                        <>
-                          <div onClick={() => updateSceneElement('location', null)} className="cursor-pointer rounded-xl border-2 p-4 flex items-center justify-center bg-slate-800 h-28 border-slate-700 hover:border-slate-500">
-                            <span className="text-slate-400 text-sm">Fundo Preto</span>
+                        {/* SUB-PAINEL 1: CONTROLES DA TRILHA SONORA */}
+                        <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 flex flex-wrap justify-between items-center gap-2">
+                          <div className="flex items-center gap-2">
+                            <Play className="w-4 h-4 text-purple-400 fill-current" />
+                            <span className="text-xs font-bold uppercase tracking-wider text-slate-300">Trilha Principal:</span>
+                            <span className="text-xs text-purple-300 italic truncate max-w-[150px]">
+                              {tracks.find(t => t.id === activeScene.audio?.trackId)?.name || "Nenhuma tocando"}
+                            </span>
                           </div>
-                          {/* Desenha os Ícones de Pastas de Cenários */}
-                          {locationFolders.map(folder => (
-                            <div key={folder} onClick={() => setActiveFolderLocations(folder)} className="cursor-pointer rounded-xl border-2 p-4 flex flex-col items-center justify-center bg-slate-800/80 h-28 border-slate-700 hover:border-blue-500 transition-all group">
-                              <Folder className="w-10 h-10 text-blue-400 group-hover:scale-110 transition-transform mb-2 fill-current opacity-80" />
-                              <span className="text-slate-300 text-sm font-bold truncate w-full text-center">{folder}</span>
+                          <div className="flex gap-4 items-center ml-auto">
+                            <div className="flex items-center gap-2 bg-slate-950/60 px-2 py-1 rounded border border-slate-800">
+                              <span className="text-[10px] text-slate-400 font-bold uppercase">Vol:</span>
+                              <input type="range" min="0" max="1" step="0.05" 
+                                value={activeScene.audio?.volume !== undefined ? activeScene.audio.volume : 1} 
+                                onChange={handleVolumeChange} 
+                                onMouseUp={handleVolumeCommit} 
+                                onTouchEnd={handleVolumeCommit} 
+                                className="w-16 md:w-24 accent-purple-500 h-1 bg-slate-800 rounded appearance-none cursor-pointer" />
                             </div>
-                          ))}
-                        </>
-                      )}
-                      
-                      {displayLocations.map(loc => (
-                        <div key={loc.id} className="relative group h-28">
-                          <div onClick={() => updateSceneElement('location', loc)} className={`cursor-pointer rounded-xl border-2 overflow-hidden w-full h-full relative ${activeScene.location?.id === loc.id ? 'border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)]' : 'border-slate-700 hover:border-slate-500'}`}>
-                            <img src={getAssetUrl(loc.image || loc.fileData)} alt={loc.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform" />
-                            <div className="absolute inset-0 bg-black/60 flex items-end p-2"><span className="text-white text-xs font-medium truncate">{loc.name}</span></div>
-                          </div>
-                          
-                          <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                            <button onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'location', data: loc }); }} className="p-1.5 bg-blue-900/90 text-white rounded-lg hover:bg-blue-600 shadow-lg transition-colors">
-                              <Pencil className="w-4 h-4" />
-                            </button>
-                            <button onClick={(e) => { e.stopPropagation(); deleteAsset('locations', loc.id); }} className="p-1.5 bg-red-900/90 text-white rounded-lg hover:bg-red-600 shadow-lg transition-colors">
-                              <Trash2 className="w-4 h-4" />
+
+                            {queuedTrackId && (
+                              <button onClick={executeTransition} className="bg-purple-600 hover:bg-purple-500 text-white px-3 py-1 rounded text-xs font-bold flex items-center gap-1 animate-pulse">
+                                <FastForward className="w-3 h-3 fill-current" /> Transicionar
+                              </button>
+                            )}
+                            <label className="flex items-center gap-1 text-xs text-slate-400 cursor-pointer hover:text-white">
+                              <input type="checkbox" checked={activeScene.audio?.loop} onChange={toggleLoop} className="accent-purple-500" />
+                              Loop
+                            </label>
+                            <button onClick={stopAudio} className="text-[10px] bg-slate-800 hover:bg-red-950 text-slate-300 py-1 px-2 rounded border border-slate-700">
+                              Parar Trilha
                             </button>
                           </div>
                         </div>
-                      ))}
+
+                        {/* SUB-PAINEL 2: CONTROLES DO SOM AMBIENTE */}
+                        <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 flex flex-wrap justify-between items-center gap-2">
+                          <div className="flex items-center gap-2">
+                            <Wind className="w-4 h-4 text-emerald-400" />
+                            <span className="text-xs font-bold uppercase tracking-wider text-slate-300">Som Ambiente:</span>
+                            <span className="text-xs text-emerald-300 italic truncate max-w-[150px]">
+                              {tracks.find(t => t.id === activeScene.ambient?.trackId)?.name || "Nenhum ativo"}
+                            </span>
+                          </div>
+                          <div className="flex gap-4 items-center ml-auto">
+                            <div className="flex items-center gap-2 bg-slate-950/60 px-2 py-1 rounded border border-slate-800">
+                              <span className="text-[10px] text-slate-400 font-bold uppercase">Vol:</span>
+                              <input type="range" min="0" max="1" step="0.05" 
+                                value={activeScene.ambient?.volume !== undefined ? activeScene.ambient.volume : 0.6} 
+                                onChange={handleAmbientVolumeChange} 
+                                onMouseUp={handleAmbientVolumeCommit} 
+                                onTouchEnd={handleAmbientVolumeCommit} 
+                                className="w-16 md:w-24 accent-emerald-500 h-1 bg-slate-800 rounded appearance-none cursor-pointer" />
+                            </div>
+
+                            <label className="flex items-center gap-1 text-xs text-slate-400 cursor-pointer hover:text-white">
+                              <input type="checkbox" checked={activeScene.ambient?.loop} onChange={toggleAmbientLoop} className="accent-emerald-500" />
+                              Loop
+                            </label>
+                            <button onClick={stopAmbient} className="text-[10px] bg-slate-800 hover:bg-red-950 text-slate-300 py-1 px-2 rounded border border-slate-700">
+                              Parar Ambiente
+                            </button>
+                          </div>
+                        </div>
+
+                        {activeTracks.length === 0 && <p className="text-slate-500 text-sm italic py-2">Sem músicas ou ambientes. Faça upload de um MP3.</p>}
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {activeTracks.map(track => {
+                            const isPlayingTrack = activeScene.audio?.trackId === track.id;
+                            const isPlayingAmbient = activeScene.ambient?.trackId === track.id;
+                            const isQueued = queuedTrackId === track.id;
+                            
+                            const trackTags = track.tags || [];
+                            const hasTag = (name) => trackTags.some(t => t.toLowerCase() === name.toLowerCase());
+
+                            let cardColorClass = 'border-slate-800 bg-slate-900/50 hover:border-slate-700';
+                            if (isPlayingTrack) cardColorClass = 'border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.15)] bg-slate-900';
+                            else if (isPlayingAmbient) cardColorClass = 'border-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.15)] bg-slate-900';
+                            else if (isQueued) cardColorClass = 'border-amber-500 border-dashed bg-slate-900';
+                            else if (hasTag('combate') || hasTag('batalha') || hasTag('boss')) cardColorClass = 'border-red-900/40 bg-red-950/10 hover:border-red-700/60';
+                            else if (hasTag('tranquila') || hasTag('calma') || hasTag('cidade')) cardColorClass = 'border-cyan-900/40 bg-cyan-950/10 hover:border-cyan-700/60';
+                            else if (hasTag('suspense') || hasTag('terror') || hasTag('caverna')) cardColorClass = 'border-orange-900/40 bg-orange-950/10 hover:border-orange-700/60';
+
+                            return (
+                              <div key={track.id} className={`relative group p-3 rounded-xl border flex flex-col gap-2 transition-all ${cardColorClass}`}>
+                                <div className="pr-6">
+                                  <span className="font-medium text-xs text-slate-200 truncate block">{track.name}</span>
+                                  {trackTags.length > 0 && (
+                                    <div className="flex flex-wrap gap-1 mt-1">
+                                      {trackTags.map((tag, idx) => (
+                                        <span key={idx} className="text-[9px] px-1.5 py-0.5 rounded bg-slate-950/60 text-slate-400 border border-slate-800 uppercase tracking-tight font-semibold">
+                                          {tag}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                                
+                                <div className="flex gap-1.5 mt-auto pt-1">
+                                  <button 
+                                    onClick={() => { if (!isPlayingTrack) setQueuedTrackId(track.id); }}
+                                    className={`flex-1 py-1 rounded text-[10px] font-bold transition-colors flex items-center justify-center gap-1
+                                      ${isPlayingTrack ? 'bg-purple-600 text-white' : 'bg-slate-800/80 hover:bg-purple-950 text-purple-400'}`}
+                                  >
+                                    <Play className="w-2.5 h-2.5 fill-current" /> Trilha
+                                  </button>
+                                  
+                                  <button 
+                                    onClick={() => playAmbient(track.id)}
+                                    className={`flex-1 py-1 rounded text-[10px] font-bold transition-colors flex items-center justify-center gap-1
+                                      ${isPlayingAmbient ? 'bg-emerald-600 text-white' : 'bg-slate-800/80 hover:bg-emerald-950 text-emerald-400'}`}
+                                  >
+                                    <Wind className="w-2.5 h-2.5" /> Ambiente
+                                  </button>
+                                </div>
+
+                                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                  <button onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'track', data: track }); }} title="Editar Áudio" className="p-1.5 bg-blue-900/90 text-white rounded hover:bg-blue-600 transition-colors">
+                                    <Pencil className="w-3 h-3" />
+                                  </button>
+                                  <button onClick={(e) => { e.stopPropagation(); deleteAsset('tracks', track.id); }} title="Excluir Áudio" className="p-1.5 bg-red-950 text-red-400 rounded hover:bg-red-600 hover:text-white transition-colors">
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+
+                        {activeScene.audio?.trackId && (
+                          <div className="mt-2 flex items-center gap-4 text-sm text-slate-300 bg-slate-900 p-3 rounded-xl border border-slate-800 shadow-inner">
+                            <Clock className="w-4 h-4 text-slate-500" />
+                            <span className="w-12 text-right text-xs font-mono font-bold tracking-wider text-purple-400">{formatTime(audioProgress.time)}</span>
+                            <input type="range" min="0" max={audioProgress.duration || 100} value={audioProgress.time || 0} onChange={handleSeekChange} onMouseUp={handleSeekCommit} onTouchEnd={handleSeekCommit} className="flex-1 accent-purple-500 cursor-pointer h-2 bg-black rounded-lg appearance-none border border-slate-800" />
+                            <span className="w-12 text-xs font-mono tracking-wider text-slate-500">{formatTime(audioProgress.duration)}</span>
+                          </div>
+                        )}
+                      </section>
                     </div>
-                  </section>
-                  
-                  {/* --- SEÇÃO LOJAS / COMÉRCIO --- */}
-                  <section>
-                    <div className="flex items-center justify-between border-b border-slate-700 pb-2 mb-4">
-                      <div className="flex items-center gap-4">
-                        <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-                          <Map className="w-5 h-5 text-yellow-600" /> Lojas & Comércio
-                        </h2>
-                        <button 
-                          onClick={() => setModalState({ isOpen: true, type: 'shop', data: null })}
-                          className="bg-slate-800 hover:bg-slate-700 text-xs px-2 py-1 rounded text-yellow-500 flex items-center gap-1 border border-slate-700 transition-colors"
-                        >
-                          <Plus className="w-3 h-3" /> Criar Loja
-                        </button>
-                      </div>
-                    </div>
-                    
-                    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-                      <div onClick={() => publishScene({ ...activeScene, shop: null })} className="cursor-pointer rounded-xl border-2 p-4 flex flex-col items-center justify-center bg-slate-800 h-24 border-slate-700 hover:border-slate-500 transition-colors">
-                         <Store className="w-6 h-6 text-slate-500 mb-2" />
-                         <span className="text-slate-400 text-xs text-center font-medium">Fechar Loja</span>
-                      </div>
-                      
-                      {shops.filter(s => s.campaignId === activeCampaignId).map(shop => {
-                        const isShopActive = activeScene.shop?.id === shop.id;
-                        return (
-                          <div key={shop.id} className="relative group h-24">
-                            <div onClick={() => { const vendor = npcs.find(n => n.id === shop.vendorId); publishScene({ ...activeScene, shop: shop, npc: vendor || null }); }} 
-                              className={`cursor-pointer rounded-xl border-2 overflow-hidden w-full h-full relative flex flex-col justify-end bg-slate-900 ${isShopActive ? 'border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.3)]' : 'border-slate-700 hover:border-slate-500'}`}>
-                              {/* CORREÇÃO: getAssetUrl adicionado! */}
-                              {shop.fileData && <img src={getAssetUrl(shop.fileData)} className="absolute inset-0 w-full h-full object-cover opacity-40 group-hover:opacity-70 transition-opacity" alt={shop.name} />}
-                              <div className="relative z-10 p-2 bg-gradient-to-t from-black/90 to-transparent pt-6">
-                                <span className="text-yellow-500 font-bold text-sm truncate block drop-shadow-md">{shop.name}</span>
-                                <span className="text-slate-300 text-[10px] truncate block">{shop.items.length} itens catalogados</span>
+                  )}
+
+                  {/* TAB 2: MAPAS & CENÁRIOS */}
+                  {uiState?.activeTab === 'maps' && (
+                    <div className="tab-content flex flex-col gap-8">
+                      {/* --- SEÇÃO CENÁRIOS --- */}
+                      <section>
+                        <div className="flex items-center justify-between border-b border-slate-700 pb-2 mb-4">
+                          <div className="flex items-center gap-4">
+                            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                              <Map className="w-5 h-5 text-blue-400" /> Cenários
+                            </h2>
+                            <button 
+                              onClick={() => setModalState({ isOpen: true, type: 'location', data: null })}
+                              className="bg-slate-800 hover:bg-slate-700 text-xs px-2 py-1 rounded text-blue-400 flex items-center gap-1 border border-slate-700"
+                            >
+                              <Upload className="w-3 h-3" /> Fazer Upload
+                            </button>
+                          </div>
+                          <label className={`flex items-center gap-2 text-sm font-bold px-3 py-1.5 rounded cursor-pointer border transition-all ${activeScene.isMapMode ? 'bg-blue-600 text-white border-blue-500 shadow-[0_0_10px_rgba(37,99,235,0.4)]' : 'bg-blue-950/30 text-blue-400 border-blue-900/50 hover:bg-blue-900/40'}`}>
+                            <input 
+                              type="checkbox" 
+                              checked={activeScene.isMapMode || false} 
+                              onChange={(e) => publishScene({ ...activeScene, isMapMode: e.target.checked })} 
+                              className="hidden" 
+                            />
+                            <Map className="w-4 h-4" /> {activeScene.isMapMode ? 'Modo Mapa: ATIVO' : 'Modo Planta Baixa'}
+                          </label>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+                          {/* Botão de Voltar da Pasta */}
+                          {activeFolderLocations && (
+                            <div className="col-span-full flex items-center gap-2 mb-2">
+                              <button onClick={() => setActiveFolderLocations('')} className="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-sm text-slate-300 flex items-center gap-1 transition-colors border border-slate-700">
+                                <ChevronLeft className="w-4 h-4"/> Voltar
+                              </button>
+                              <span className="text-slate-400 text-sm font-bold flex items-center gap-2">
+                                <FolderOpen className="w-4 h-4 text-blue-400" /> Pasta: {activeFolderLocations}
+                              </span>
+                            </div>
+                          )}
+
+                          {!activeFolderLocations && (
+                            <>
+                              <div onClick={() => updateSceneElement('location', null)} className="cursor-pointer rounded-xl border-2 p-4 flex items-center justify-center bg-slate-800 h-28 border-slate-700 hover:border-slate-500">
+                                <span className="text-slate-400 text-sm">Fundo Preto</span>
+                              </div>
+                              {/* Desenha os Ícones de Pastas de Cenários */}
+                              {locationFolders.map(folder => (
+                                <div key={folder} onClick={() => setActiveFolderLocations(folder)} className="cursor-pointer rounded-xl border-2 p-4 flex flex-col items-center justify-center bg-slate-800/80 h-28 border-slate-700 hover:border-blue-500 transition-all group">
+                                  <Folder className="w-10 h-10 text-blue-400 group-hover:scale-110 transition-transform mb-2 fill-current opacity-80" />
+                                  <span className="text-slate-300 text-sm font-bold truncate w-full text-center">{folder}</span>
+                                </div>
+                              ))}
+                            </>
+                          )}
+                          
+                          {displayLocations.map(loc => (
+                            <div key={loc.id} className="relative group h-28">
+                              <div onClick={() => updateSceneElement('location', loc)} className={`cursor-pointer rounded-xl border-2 overflow-hidden w-full h-full relative ${activeScene.location?.id === loc.id ? 'border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)]' : 'border-slate-700 hover:border-slate-500'}`}>
+                                <img src={getAssetUrl(loc.image || loc.fileData)} alt={loc.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform" />
+                                <div className="absolute inset-0 bg-black/60 flex items-end p-2"><span className="text-white text-xs font-medium truncate">{loc.name}</span></div>
+                              </div>
+                              
+                              <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                {activeScene.refuge && (
+                                  <button 
+                                    onClick={async (e) => { 
+                                      e.stopPropagation(); 
+                                      const updatedRefuge = { ...activeScene.refuge, locationId: loc.id, fileData: loc.fileData || loc.image };
+                                      const currentRefuges = await localDB.getItem('refuges') || [];
+                                      const updatedList = currentRefuges.map(r => r.id === updatedRefuge.id ? updatedRefuge : r);
+                                      await localDB.setItem('refuges', updatedList);
+                                      updateCollection('refuges', updatedList);
+                                      publishScene({ ...activeScene, refuge: updatedRefuge });
+                                    }} 
+                                    title="Definir como Fundo do Refúgio Ativo" 
+                                    className="p-1.5 bg-indigo-900/90 text-white rounded-lg hover:bg-indigo-600 shadow-lg transition-colors"
+                                  >
+                                    <Shield className="w-4 h-4 text-indigo-300" />
+                                  </button>
+                                )}
+                                <button onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'location', data: loc }); }} className="p-1.5 bg-blue-900/90 text-white rounded-lg hover:bg-blue-600 shadow-lg transition-colors">
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+                                <button onClick={(e) => { e.stopPropagation(); deleteAsset('locations', loc.id); }} className="p-1.5 bg-red-900/90 text-white rounded-lg hover:bg-red-600 shadow-lg transition-colors">
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
                               </div>
                             </div>
-                            <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                              <button onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'shop', data: shop }); }} className="p-1.5 bg-blue-900/90 text-white rounded hover:bg-blue-600"><Pencil className="w-3.5 h-3.5" /></button>
-                              <button onClick={(e) => { e.stopPropagation(); deleteAsset('shops', shop.id); }} className="p-1.5 bg-red-900/90 text-white rounded hover:bg-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
-                            </div>
-                          </div>
-                        )
-                      })}
+                          ))}
+                        </div>
+                      </section>
                     </div>
-                  </section>
-
-                  {/* --- SEÇÃO CUTSCENES (VÍDEOS) --- */}
-                  <section>
-                    <div className="flex items-center justify-between border-b border-slate-700 pb-2 mb-4">
-                      <div className="flex items-center gap-4">
-                        <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-                          <Monitor className="w-5 h-5 text-pink-400" /> Cutscenes & Vídeos
-                        </h2>
-                        <button 
-                          onClick={() => setModalState({ isOpen: true, type: 'cutscene', data: null })}
-                          className="bg-slate-800 hover:bg-slate-700 text-xs px-2 py-1 rounded text-pink-400 flex items-center gap-1 border border-slate-700 transition-colors"
-                        >
-                          <Upload className="w-3 h-3" /> Fazer Upload
-                        </button>
-                      </div>
-                    </div>
-                    
-                    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-                      <div onClick={() => updateSceneElement('cutscene', null)} className="cursor-pointer rounded-xl border-2 p-4 flex flex-col items-center justify-center bg-slate-800 h-28 border-slate-700 hover:border-slate-500">
-                         <Square className="w-6 h-6 text-slate-500 mb-2" />
-                         <span className="text-slate-400 text-xs text-center">Desativar / Parar Vídeo</span>
-                      </div>
-                      
-                      {cutscenes.filter(c => c.campaignId === activeCampaignId).map(video => (
-                        <div key={video.id} className="relative group h-28">
-                          <div onClick={() => updateSceneElement('cutscene', video)} className={`cursor-pointer rounded-xl border-2 overflow-hidden w-full h-full relative flex items-center justify-center bg-black ${activeScene.cutscene?.id === video.id ? 'border-pink-500 shadow-[0_0_15px_rgba(236,72,153,0.3)]' : 'border-slate-700 hover:border-slate-500'}`}>
-                            <Play className="w-8 h-8 text-white/50 group-hover:text-white transition-colors" />
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end p-2"><span className="text-white text-xs font-medium truncate">{video.name}</span></div>
-                          </div>
-                          
-                          <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                            <button onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'cutscene', data: video }); }} className="p-1.5 bg-blue-900/90 text-white rounded-lg hover:bg-blue-600 shadow-lg transition-colors">
-                              <Pencil className="w-4 h-4" />
-                            </button>
-                            <button onClick={(e) => { e.stopPropagation(); deleteAsset('cutscenes', video.id); }} className="p-1.5 bg-red-900/90 text-white rounded-lg hover:bg-red-600 shadow-lg transition-colors">
-                              <Trash2 className="w-4 h-4" />
+                  )}
+                  
+                  {/* TAB 3: ITENS, HANDOUTS & LOJAS */}
+                  {uiState?.activeTab === 'items' && (
+                    <div className="tab-content flex flex-col gap-8">
+                      {/* --- SEÇÃO LOJAS / COMÉRCIO --- */}
+                      <section>
+                        <div className="flex items-center justify-between border-b border-slate-700 pb-2 mb-4">
+                          <div className="flex items-center gap-4">
+                            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                              <Map className="w-5 h-5 text-yellow-600" /> Lojas & Comércio
+                            </h2>
+                            <button 
+                              onClick={() => setModalState({ isOpen: true, type: 'shop', data: null })}
+                              className="bg-slate-800 hover:bg-slate-700 text-xs px-2 py-1 rounded text-yellow-500 flex items-center gap-1 border border-slate-700 transition-colors"
+                            >
+                              <Plus className="w-3 h-3" /> Criar Loja
                             </button>
                           </div>
                         </div>
-                      ))}
+                        
+                        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+                          <div onClick={() => publishScene({ ...activeScene, shop: null })} className="cursor-pointer rounded-xl border-2 p-4 flex flex-col items-center justify-center bg-slate-800 h-24 border-slate-700 hover:border-slate-500 transition-colors">
+                             <Store className="w-6 h-6 text-slate-500 mb-2" />
+                             <span className="text-slate-400 text-xs text-center font-medium">Fechar Loja</span>
+                          </div>
+                          
+                          {shops.filter(s => s.campaignId === activeCampaignId).map(shop => {
+                            const isShopActive = activeScene.shop?.id === shop.id;
+                            return (
+                              <div key={shop.id} className="relative group h-24">
+                                <div onClick={() => { const vendor = npcs.find(n => n.id === shop.vendorId); publishScene({ ...activeScene, shop: shop, npc: vendor || null }); }} 
+                                  className={`cursor-pointer rounded-xl border-2 overflow-hidden w-full h-full relative flex flex-col justify-end bg-slate-900 ${isShopActive ? 'border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.3)]' : 'border-slate-700 hover:border-slate-500'}`}>
+                                  {/* CORREÇÃO: getAssetUrl adicionado! */}
+                                  {shop.fileData && <img src={getAssetUrl(shop.fileData)} className="absolute inset-0 w-full h-full object-cover opacity-40 group-hover:opacity-70 transition-opacity" alt={shop.name} />}
+                                  <div className="relative z-10 p-2 bg-gradient-to-t from-black/90 to-transparent pt-6">
+                                    <span className="text-yellow-500 font-bold text-sm truncate block drop-shadow-md">{shop.name}</span>
+                                    <span className="text-slate-300 text-[10px] truncate block">{shop.items.length} itens catalogados</span>
+                                  </div>
+                                </div>
+                                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                  <button onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'shop', data: shop }); }} className="p-1.5 bg-blue-900/90 text-white rounded hover:bg-blue-600"><Pencil className="w-3.5 h-3.5" /></button>
+                                  <button onClick={(e) => { e.stopPropagation(); deleteAsset('shops', shop.id); }} className="p-1.5 bg-red-900/90 text-white rounded hover:bg-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </section>
                     </div>
-                  </section>
+                  )}
 
-                  {/* --- SEÇÃO ELENCO (DIVIDIDO EM JOGADORES, INIMIGOS E NPCs) --- */}
-                  <section>
+                  {/* TAB 5: CUTSCENES (VÍDEOS) */}
+                  {uiState?.activeTab === 'cutscenes' && (
+                    <div className="tab-content flex flex-col gap-8">
+                      {/* --- SEÇÃO CUTSCENES (VÍDEOS) --- */}
+                      <section>
+                        <div className="flex items-center justify-between border-b border-slate-700 pb-2 mb-4">
+                          <div className="flex items-center gap-4">
+                            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                              <Monitor className="w-5 h-5 text-pink-400" /> Cutscenes & Vídeos
+                            </h2>
+                            <button 
+                              onClick={() => setModalState({ isOpen: true, type: 'cutscene', data: null })}
+                              className="bg-slate-800 hover:bg-slate-700 text-xs px-2 py-1 rounded text-pink-400 flex items-center gap-1 border border-slate-700 transition-colors"
+                            >
+                              <Upload className="w-3 h-3" /> Fazer Upload
+                            </button>
+                          </div>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+                          <div onClick={() => updateSceneElement('cutscene', null)} className="cursor-pointer rounded-xl border-2 p-4 flex flex-col items-center justify-center bg-slate-800 h-28 border-slate-700 hover:border-slate-500">
+                             <Square className="w-6 h-6 text-slate-500 mb-2" />
+                             <span className="text-slate-400 text-xs text-center">Desativar / Parar Vídeo</span>
+                          </div>
+                          
+                          {cutscenes.filter(c => c.campaignId === activeCampaignId).map(video => (
+                            <div key={video.id} className="relative group h-28">
+                              <div onClick={() => updateSceneElement('cutscene', video)} className={`cursor-pointer rounded-xl border-2 overflow-hidden w-full h-full relative flex items-center justify-center bg-black ${activeScene.cutscene?.id === video.id ? 'border-pink-500 shadow-[0_0_15px_rgba(236,72,153,0.3)]' : 'border-slate-700 hover:border-slate-500'}`}>
+                                <Play className="w-8 h-8 text-white/50 group-hover:text-white transition-colors" />
+                                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end p-2"><span className="text-white text-xs font-medium truncate">{video.name}</span></div>
+                              </div>
+                              
+                              <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                <button onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'cutscene', data: video }); }} className="p-1.5 bg-blue-900/90 text-white rounded-lg hover:bg-blue-600 shadow-lg transition-colors">
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+                                <button onClick={(e) => { e.stopPropagation(); deleteAsset('cutscenes', video.id); }} className="p-1.5 bg-red-900/90 text-white rounded-lg hover:bg-red-600 shadow-lg transition-colors">
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </section>
+                    </div>
+                  )}
+
+                  {/* TAB 1: ELENCO DA CAMPANHA (NPCs / JOGADORES) */}
+                  {(!uiState?.activeTab || uiState?.activeTab === 'npcs') && (
+                    <div className="tab-content flex flex-col gap-8">
+                      {/* --- SEÇÃO ELENCO (DIVIDIDO EM JOGADORES, INIMIGOS E NPCs) --- */}
+                      <section>
                     <div className="flex items-center justify-between border-b border-slate-700 pb-2 mb-6">
                       <div className="flex items-center gap-4">
                         <h2 className="text-lg font-semibold text-white flex items-center gap-2">
@@ -722,51 +780,186 @@ export default function App() {
                       </div>
                       <label className="flex items-center gap-2 text-sm text-amber-400 font-bold bg-amber-900/20 px-3 py-1 rounded cursor-pointer border border-amber-900/50 hover:bg-amber-900/40">
                         <input type="checkbox" checked={activeScene.hideNpcName} onChange={(e) => updateSceneElement('hideNpcName', e.target.checked)} className="accent-amber-500" />
-                        Ocultar Nome (????)
+                        Ocultar Todos os Nomes (????)
                       </label>
                     </div>
+
+                    {/* --- PAINEL DE CONTROLADORES DE NPCs ATIVOS NA CENA --- */}
+                    {(() => {
+                      const rawNpcs = Array.isArray(activeScene.npcs) 
+                        ? activeScene.npcs 
+                        : (activeScene.npc ? [activeScene.npc] : []);
+                      const activeSceneNpcs = rawNpcs.filter(n => !n.isFadingOut);
+
+                      return (
+                        <div className="bg-slate-900/90 border border-slate-700/80 rounded-xl p-4 mb-6 shadow-xl">
+                          <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-3">
+                            <div className="flex items-center gap-2">
+                              <Users className="w-5 h-5 text-amber-500" />
+                              <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">
+                                NPCs na Cena ({activeSceneNpcs.length}/4)
+                              </h3>
+                            </div>
+                            {activeSceneNpcs.length >= 4 && (
+                              <span className="text-xs text-amber-400 font-medium bg-amber-950/60 border border-amber-800/50 px-2 py-0.5 rounded">
+                                Limite de 4 NPCs atingido
+                              </span>
+                            )}
+                          </div>
+
+                          {activeSceneNpcs.length === 0 ? (
+                            <p className="text-xs text-slate-500 italic py-2 text-center">
+                              Nenhum NPC ativo na cena. Clique em um card do elenco abaixo para adicionar à cena.
+                            </p>
+                          ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                              {activeSceneNpcs.map((activeNpc, index) => {
+                                const fullNpc = npcs.find(n => n.id === activeNpc.id) || activeNpc;
+                                const currentVariant = (fullNpc.variants && fullNpc.variants[activeNpc.variantIndex || 0]) || activeNpc.fileData || fullNpc.fileData;
+
+                                return (
+                                  <div 
+                                    key={activeNpc.id} 
+                                    className={`flex items-center gap-3 p-2.5 bg-slate-950 rounded-lg border transition-all ${
+                                      activeNpc.isHidden ? 'border-amber-900/50 bg-slate-950/80' : 'border-amber-500/40 shadow-md'
+                                    }`}
+                                  >
+                                    <div className="relative w-12 h-12 rounded-md overflow-hidden bg-slate-900 shrink-0 border border-slate-700">
+                                      <img 
+                                        src={getAssetUrl(currentVariant)} 
+                                        alt={activeNpc.name} 
+                                        className={`w-full h-full object-cover object-top ${activeNpc.isHidden ? 'filter brightness-0 opacity-20' : ''}`} 
+                                      />
+                                      <span className="absolute bottom-0 right-0 bg-amber-600 text-slate-950 font-black text-[9px] px-1 rounded-tl">
+                                        #{index + 1}
+                                      </span>
+                                    </div>
+
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center justify-between gap-1">
+                                        <span className="text-xs font-bold text-white truncate block">
+                                          {activeNpc.hideName ? "????" : activeNpc.name}
+                                        </span>
+                                        {activeNpc.isHidden && (
+                                          <span className="text-[9px] bg-slate-800 text-amber-400 font-semibold px-1 rounded">
+                                            Silhueta
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      <div className="flex items-center gap-1 mt-1.5">
+                                        {fullNpc.variants && fullNpc.variants.length > 1 && (
+                                          <button
+                                            onClick={() => {
+                                              const nextIdx = ((activeNpc.variantIndex || 0) + 1) % fullNpc.variants.length;
+                                              switchNPCVariant(activeNpc.id, nextIdx);
+                                            }}
+                                            title="Trocar Expressão / Variante"
+                                            className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 transition-colors"
+                                          >
+                                            <RefreshCw className="w-3 h-3" />
+                                          </button>
+                                        )}
+
+                                        <button
+                                          onClick={() => toggleNPCHidden(activeNpc.id)}
+                                          title={activeNpc.isHidden ? "Revelar NPC (Desativar Silhueta)" : "Ocultar NPC (Mostrar Silhueta)"}
+                                          className={`p-1 rounded border transition-colors ${
+                                            activeNpc.isHidden 
+                                              ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold' 
+                                              : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+                                          }`}
+                                        >
+                                          {activeNpc.isHidden ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                                        </button>
+
+                                        <button
+                                          onClick={() => toggleNPCName(activeNpc.id)}
+                                          title={activeNpc.hideName ? "Mostrar Nome" : "Ocultar Nome (????)"}
+                                          className={`p-1 rounded border transition-colors ${
+                                            activeNpc.hideName 
+                                              ? 'bg-amber-900/70 text-amber-300 border-amber-700' 
+                                              : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+                                          }`}
+                                        >
+                                          <Tag className="w-3 h-3" />
+                                        </button>
+
+                                        <button
+                                          onClick={() => removeNPCFromScene(activeNpc.id)}
+                                          title="Remover da Cena"
+                                          className="p-1 bg-red-950/80 hover:bg-red-900 text-red-400 hover:text-white rounded border border-red-900/60 ml-auto transition-colors"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                     
                     <div className="flex flex-col gap-8">
                       {(() => {
+                        const rawNpcsList = Array.isArray(activeScene.npcs) 
+                          ? activeScene.npcs 
+                          : (activeScene.npc ? [activeScene.npc] : []);
+                        const currentActiveNpcs = rawNpcsList.filter(n => !n.isFadingOut);
+
                         const renderCharacterCard = (npc) => {
-                          // Lógica inteligente: Verifica se o NPC está ativo no Refúgio ou na Cena Normal
                           const isNpcActive = activeScene.refuge 
                             ? activeScene.refugeNpcs?.some(n => n.id === npc.id)
-                            : activeScene.npc?.id === npc.id;
-                            
-                          const displayImage = (!activeScene.refuge && isNpcActive) ? getAssetUrl(activeScene.npc.fileData) : getAssetUrl(npc.fileData);
+                            : currentActiveNpcs.some(n => n.id === npc.id);
+
+                          const activeSceneItem = currentActiveNpcs.find(n => n.id === npc.id);
+                          const currentVariantIndex = activeSceneItem?.variantIndex || 0;
+                          const displayImage = (!activeScene.refuge && isNpcActive && npc.variants?.[currentVariantIndex]) 
+                            ? getAssetUrl(npc.variants[currentVariantIndex]) 
+                            : getAssetUrl(npc.fileData);
 
                           return (
                             <div key={npc.id} className="relative group h-40">
                               <div 
                                 onClick={() => { 
-                                  // --- AQUI ESTÁ A MUDANÇA DO PONTO 4 ---
                                   if (activeScene.refuge) {
                                     let currentNpcs = activeScene.refugeNpcs || [];
                                     const exists = currentNpcs.find(n => n.id === npc.id);
                                     if (exists) {
-                                      // Se já está na tela, o clique REMOVE ele.
                                       publishScene({ ...activeScene, refugeNpcs: currentNpcs.filter(n => n.id !== npc.id) });
                                     } else if (currentNpcs.length < 4) {
-                                      // Se não está na tela e tem vaga, ADICIONA.
                                       publishScene({ ...activeScene, refugeNpcs: [...currentNpcs, { ...npc, fileData: npc.fileData }] });
                                     } else {
                                       alert("O Refúgio suporta no máximo 4 personagens visíveis.");
                                     }
                                   } else {
-                                    // Comportamento normal se não houver refúgio ativo
-                                    updateSceneElement('npc', { ...npc, fileData: npc.fileData }); 
+                                    if (isNpcActive) {
+                                      removeNPCFromScene(npc.id);
+                                    } else {
+                                      if (currentActiveNpcs.length >= 4) {
+                                        alert("Limite de 4 NPCs na cena atingido!");
+                                      } else {
+                                        addNPCToScene(npc);
+                                      }
+                                    }
                                   }
                                 }} 
-                                className={`cursor-pointer rounded-xl border-2 overflow-hidden bg-slate-800 w-full h-full relative ${isNpcActive ? 'border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'border-slate-700 hover:border-slate-500'}`}
+                                className={`cursor-pointer rounded-xl border-2 overflow-hidden bg-slate-800 w-full h-full relative transition-all duration-300 ${isNpcActive ? 'border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.3)]' : 'border-slate-700 hover:border-slate-500'}`}
                               >
                                 <img src={displayImage} alt={npc.name} className="w-full h-full object-cover object-top opacity-70 group-hover:opacity-100 transition-all duration-300" />
                                 <div className="absolute bottom-0 w-full bg-gradient-to-t from-black to-transparent p-3 pt-6 pb-2">
                                   <h3 className="text-white text-sm font-bold truncate drop-shadow-md">{npc.name}</h3>
                                 </div>
+                                {isNpcActive && !activeScene.refuge && (
+                                  <div className="absolute top-2 left-2 bg-amber-500 text-slate-950 text-[10px] font-black px-1.5 py-0.5 rounded shadow">
+                                    Na Cena
+                                  </div>
+                                )}
                               </div>
                               
-                              {/* (O resto do renderCharacterCard continua igual com as variantes e botões de excluir/editar) */}
                               {npc.variants && npc.variants.length > 1 && (
                                 <div className="absolute bottom-1 right-2 flex gap-1 z-20">
                                   {npc.variants.map((vImg, idx) => (
@@ -774,9 +967,11 @@ export default function App() {
                                       key={idx}
                                       onClick={(e) => { 
                                         e.stopPropagation(); 
-                                        if(!activeScene.refuge) updateSceneElement('npc', { ...npc, fileData: vImg }); 
+                                        if(!activeScene.refuge && isNpcActive) {
+                                          switchNPCVariant(npc.id, idx);
+                                        }
                                       }}
-                                      className={`w-5 h-5 md:w-6 md:h-6 rounded-full overflow-hidden border-2 cursor-pointer transition-transform hover:scale-125 bg-slate-900 ${!activeScene.refuge && isNpcActive && activeScene.npc.fileData === vImg ? 'border-amber-500 scale-110 shadow-lg' : 'border-slate-400/50 hover:border-white'}`}
+                                      className={`w-5 h-5 md:w-6 md:h-6 rounded-full overflow-hidden border-2 cursor-pointer transition-transform hover:scale-125 bg-slate-900 ${!activeScene.refuge && isNpcActive && currentVariantIndex === idx ? 'border-amber-500 scale-110 shadow-lg' : 'border-slate-400/50 hover:border-white'}`}
                                     >
                                       <img src={getAssetUrl(vImg)} className="w-full h-full object-cover object-top" alt="var" />
                                     </div>
@@ -785,9 +980,20 @@ export default function App() {
                               )}
 
                               <div className="absolute top-2 right-2 flex flex-col gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-30">
-                                <button onClick={(e) => { e.stopPropagation(); quickAddToCombat(npc); }} className="p-1.5 bg-red-600/90 text-white rounded-lg hover:bg-red-500 shadow-lg flex items-center justify-center border border-red-400/50"><Plus className="w-4 h-4" /></button>
-                                <button onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'npc', data: npc }); }} className="p-1.5 bg-blue-900/90 text-white rounded-lg hover:bg-blue-600 shadow-lg flex items-center justify-center border border-blue-700 transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
-                                <button onClick={(e) => { e.stopPropagation(); deleteAsset('npcs', npc.id); }} className="p-1.5 bg-slate-900/90 text-slate-400 rounded-lg hover:bg-slate-700 hover:text-white shadow-lg flex items-center justify-center border border-slate-700 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                                <button onClick={(e) => { e.stopPropagation(); setSheetModalState({ isOpen: true, npcId: npc.id }); }} title="Ficha do Personagem" className="p-1.5 bg-amber-600/90 text-slate-950 font-black rounded-lg hover:bg-amber-500 shadow-lg flex items-center justify-center border border-amber-400"><FileText className="w-3.5 h-3.5" /></button>
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); toggleNPCParty(npc.id); }} 
+                                  title={npc.inParty ? "Remover do Party Tracker" : "Adicionar ao Party Tracker"} 
+                                  className={`p-1.5 rounded-lg shadow-lg flex items-center justify-center transition-colors border ${
+                                    npc.inParty 
+                                      ? 'bg-amber-500 text-slate-950 font-black border-amber-300 hover:bg-amber-400' 
+                                      : 'bg-slate-900/90 text-slate-300 border-slate-700 hover:bg-amber-900/60 hover:text-amber-400 hover:border-amber-700'
+                                  }`}
+                                >
+                                  <Users className="w-3.5 h-3.5" />
+                                </button>
+                                <button onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'npc', data: npc }); }} title="Editar NPC" className="p-1.5 bg-blue-900/90 text-white rounded-lg hover:bg-blue-600 shadow-lg flex items-center justify-center border border-blue-700 transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
+                                <button onClick={(e) => { e.stopPropagation(); deleteAsset('npcs', npc.id); }} title="Excluir NPC" className="p-1.5 bg-slate-900/90 text-slate-400 rounded-lg hover:bg-slate-700 hover:text-white shadow-lg flex items-center justify-center border border-slate-700 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
                               </div>
                             </div>
                           );
@@ -869,7 +1075,12 @@ export default function App() {
                       })()}
                     </div>
                   </section>
+                </div>
+              )}
 
+              {/* HANDOUTS (ABAS DE ITENS) */}
+              {uiState?.activeTab === 'items' && (
+                <div className="tab-content flex flex-col gap-8">
                   {/* --- SEÇÃO HANDOUTS (ITENS E DOCUMENTOS) --- */}
                   <section>
                     <div className="flex items-center justify-between border-b border-slate-700 pb-2 mb-4">
@@ -914,6 +1125,12 @@ export default function App() {
                       ))}
                     </div>
                   </section>
+                </div>
+              )}
+
+              {/* REFÚGIOS & CONFLITOS (DENTRO DA ABA CENÁRIOS / MAPAS) */}
+              {uiState?.activeTab === 'maps' && (
+                <div className="tab-content flex flex-col gap-8 mt-6">
                   {/* --- SEÇÃO REFÚGIOS --- */}
                   <section>
                     <div className="flex items-center justify-between border-b border-slate-700 pb-2 mb-4">
@@ -933,18 +1150,24 @@ export default function App() {
                          <span className="text-slate-400 text-xs">Desativar Refúgio</span>
                       </div>
                       
-                      {displayRefuges.map(ref => (
-                        <div key={ref.id} className="relative group h-28">
-                          <div onClick={() => publishScene({ ...activeScene, refuge: ref, location: null, shop: null, isMapMode: false })} className={`cursor-pointer rounded-xl border-2 overflow-hidden w-full h-full relative ${activeScene.refuge?.id === ref.id ? 'border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.3)]' : 'border-slate-700 hover:border-slate-500'}`}>
-                            <img src={getAssetUrl(ref.fileData) || '/refugio-padrao.jpg'} alt={ref.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform opacity-60"/>
-                            <div className="absolute inset-0 flex items-end p-2 bg-gradient-to-t from-black/80 to-transparent"><span className="text-indigo-300 font-bold text-sm truncate">{ref.name}</span></div>
+                      {displayRefuges.map(ref => {
+                        const bgData = ref.locationId 
+                          ? (locations.find(l => l.id === ref.locationId)?.fileData || ref.fileData) 
+                          : ref.fileData;
+
+                        return (
+                          <div key={ref.id} className="relative group h-28">
+                            <div onClick={() => publishScene({ ...activeScene, refuge: ref, location: null, shop: null, isMapMode: false })} className={`cursor-pointer rounded-xl border-2 overflow-hidden w-full h-full relative ${activeScene.refuge?.id === ref.id ? 'border-indigo-500 shadow-[0_0_15px_rgba(99,102,241,0.3)]' : 'border-slate-700 hover:border-slate-500'}`}>
+                              <img src={getAssetUrl(bgData) || '/refugio-padrao.jpg'} alt={ref.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform opacity-60"/>
+                              <div className="absolute inset-0 flex items-end p-2 bg-gradient-to-t from-black/80 to-transparent"><span className="text-indigo-300 font-bold text-sm truncate">{ref.name}</span></div>
+                            </div>
+                            <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 z-10">
+                              <button onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'refuge', data: ref }); }} className="p-1.5 bg-blue-900/90 text-white rounded"><Pencil className="w-4 h-4" /></button>
+                              <button onClick={(e) => { e.stopPropagation(); deleteAsset('refuges', ref.id); }} className="p-1.5 bg-red-900/90 text-white rounded"><Trash2 className="w-4 h-4" /></button>
+                            </div>
                           </div>
-                          <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 z-10">
-                            <button onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'refuge', data: ref }); }} className="p-1.5 bg-blue-900/90 text-white rounded"><Pencil className="w-4 h-4" /></button>
-                            <button onClick={(e) => { e.stopPropagation(); deleteAsset('refuges', ref.id); }} className="p-1.5 bg-red-900/90 text-white rounded"><Trash2 className="w-4 h-4" /></button>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
 
                     {/* HUD DO MESTRE (Só aparece quando o Refúgio está ativo) */}
@@ -1009,184 +1232,109 @@ export default function App() {
                     )}
                   </section>
 
-                  {/* --- SEÇÃO INICIATIVA & COMBATE --- */}
+                  {/* --- SEÇÃO SISTEMA DE CONFLITOS DE ASSIMILAÇÃO --- */}
                   <section className="bg-slate-950 p-4 rounded-xl border border-slate-800 shadow-md">
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
-                      <div className="flex items-center gap-4">
-                        <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-                          <Users className="w-5 h-5 text-red-500" /> Rastreador de Combate
-                        </h2>
-                        <div className="bg-red-950/40 border border-red-900 px-3 py-1 rounded text-red-400 font-bold tracking-wider text-sm">
-                          RODADA {combatState.round}
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <button 
-                          onClick={clearCombat}
-                          className="bg-slate-800 hover:bg-red-950 text-xs px-3 py-1.5 rounded text-slate-400 hover:text-red-400 border border-slate-700 transition-colors"
-                        >
-                          Limpar Combate
-                        </button>
-                        <button 
-                          onClick={() => setModalState({ isOpen: true, type: 'combatant', data: null })}
-                          className="bg-red-900/40 hover:bg-red-900/60 text-xs px-3 py-1.5 rounded text-red-400 flex items-center gap-1 border border-red-900 transition-colors font-bold"
-                        >
-                          <Plus className="w-3 h-3" /> Adicionar à Iniciativa
-                        </button>
-                        <button 
-                          onClick={nextTurn}
-                          className="bg-red-600 hover:bg-red-500 text-xs px-4 py-1.5 rounded text-white flex items-center gap-1 border border-red-500 transition-colors font-bold shadow-[0_0_10px_rgba(220,38,38,0.3)]"
-                        >
-                          <FastForward className="w-3 h-3 fill-current" /> Próximo Turno
-                        </button>
-                      </div>
-                    </div>
+                    <ConflictTracker
+                      conflicts={conflicts}
+                      activeConflict={activeConflict}
+                      locations={locations}
+                      tracks={tracks}
+                      npcs={npcs}
+                      onSaveConflict={saveConflict}
+                      onDeleteConflict={deleteConflict}
+                      onStartConflict={startConflict}
+                      onEndConflict={endConflict}
+                      onUpdateActiveConflict={updateActiveConflict}
+                    />
+                  </section>
+                </div>
+              )}
+
+              {/* --- BLOCO DE NOTAS SECRETO DO MESTRE --- */}
+                  <section className="bg-slate-950 p-4 rounded-xl border border-red-950 shadow-lg flex flex-col gap-4">
+                    <h3 className="text-xs uppercase tracking-widest text-red-400 font-bold flex items-center gap-2 border-b border-red-950 pb-2">
+                      <EyeOff className="w-4 h-4 text-red-500" /> Notas Secretas do Mestre
+                    </h3>
                     
-                    <div className="flex flex-col gap-2">
-                      {activeCombatants.length === 0 ? (
-                        <p className="text-slate-500 text-sm italic py-4 text-center">Nenhum combatente na iniciativa. Clique em "Adicionar à Iniciativa".</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Bloco do Cenário Ativo */}
+                      {activeScene.location ? (
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] text-blue-400 uppercase font-extrabold tracking-wider flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span> Cenário: {activeScene.location.name}
+                          </label>
+                          <textarea
+                            value={locations.find(l => l.id === activeScene.location.id)?.secretNotes || ''}
+                            onChange={(e) => updateAssetNotes('locations', activeScene.location.id, e.target.value)}
+                            rows="3"
+                            className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 focus:border-blue-500 focus:outline-none resize-none custom-scrollbar transition-colors leading-relaxed"
+                            placeholder="Armadilhas, segredos do local, testes de dificuldade (DC), Lore escondida..."
+                          />
+                        </div>
                       ) : (
-                        activeCombatants.map((combatant) => {
-                          const isActive = combatState.activeId === combatant.id;
-                          const typeStyles = {
-                            player: "bg-blue-950/20 border-blue-900/50 text-blue-400",
-                            enemy: "bg-red-950/20 border-red-900/50 text-red-400",
-                            ally: "bg-emerald-950/20 border-emerald-900/50 text-emerald-400"
-                          };
-                          const activeStyle = isActive ? "border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.2)] bg-slate-900" : "border-slate-800 hover:border-slate-600 bg-slate-900/40";
-
-                          return (
-                            <div key={combatant.id} className={`flex items-center gap-4 p-2 rounded-lg border-2 transition-all group ${activeStyle}`}>
-                              <div className="w-12 h-12 rounded-md overflow-hidden bg-black shrink-0 border border-slate-700">
-                                {/* CORREÇÃO: getAssetUrl adicionado! */}
-                                <img src={getAssetUrl(combatant.fileData)} alt={combatant.name} className="w-full h-full object-cover object-top opacity-90 group-hover:opacity-100" />
-                              </div>
-                              
-                              <div className="flex flex-col flex-1">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-bold text-white uppercase tracking-wider">{combatant.name}</span>
-                                  <span className={`text-[9px] px-1.5 py-0.5 rounded border uppercase font-bold tracking-tight ${typeStyles[combatant.type]}`}>
-                                    {combatant.type === 'player' ? 'Jogador' : combatant.type === 'enemy' ? 'Inimigo' : 'Aliado'}
-                                  </span>
-                                </div>
-                                <span className="text-xs text-slate-400">Iniciativa: {combatant.initiative}</span>
-                              </div>
-
-                              {isActive && (
-                                <div className="px-3">
-                                  <span className="flex items-center gap-1 text-xs font-bold text-amber-500 animate-pulse">
-                                    <Play className="w-3 h-3 fill-current" /> TURNO ATUAL
-                                  </span>
-                                </div>
-                              )}
-
-                              <div className="flex gap-2">
-                                <button 
-                                  onClick={() => setTurn(combatant)}
-                                  className="px-3 py-1 bg-slate-800 hover:bg-slate-700 rounded text-xs font-medium text-slate-300 transition-colors"
-                                >
-                                  Forçar Turno
-                                </button>
-                                <button 
-                                  onClick={() => deleteAsset('combatants', combatant.id)} 
-                                  className="p-1.5 bg-slate-800 hover:bg-red-600 text-slate-400 hover:text-white rounded transition-colors"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })
+                        <div className="text-[11px] text-slate-600 italic bg-slate-900/40 p-3 rounded border border-dashed border-slate-800/60 flex items-center justify-center">
+                          Nenhum cenário ativo na mesa.
+                        </div>
                       )}
+
+                      {/* Bloco do NPC Ativo */}
+                      {activeScene.npc ? (
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] text-emerald-400 uppercase font-extrabold tracking-wider flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> NPC: {activeScene.npc.name}
+                          </label>
+                          <textarea
+                            value={npcs.find(n => n.id === activeScene.npc.id)?.secretNotes || ''}
+                            onChange={(e) => updateAssetNotes('npcs', activeScene.npc.id, e.target.value)}
+                            rows="3"
+                            className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 focus:border-emerald-500 focus:outline-none resize-none custom-scrollbar transition-colors leading-relaxed"
+                            placeholder="Objetivos ocultos, fraquezas, itens que carrega, linhas de diálogo importantes..."
+                          />
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-slate-600 italic bg-slate-900/40 p-3 rounded border border-dashed border-slate-800/60 flex items-center justify-center">
+                          Nenhum NPC ativo na mesa.
+                        </div>
+                      )}
+                    </div>
+                  </section>
+
+                  {/* --- GERENCIAMENTO DE DADOS & RODAPÉ --- */}
+                  <section className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex flex-wrap items-center justify-between gap-4 shadow-md">
+                    <div>
+                      <h3 className="text-xs uppercase tracking-widest text-amber-500 font-bold">Gerenciamento de Dados</h3>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Sincronize ou faça backup de suas campanhas, mapas e NPCs.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={handleExportBackup}
+                        className="bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-2 transition-colors"
+                      >
+                        <Save className="w-3.5 h-3.5 text-emerald-400" /> Exportar Dados
+                      </button>
+                      
+                      <label className="bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-2 transition-colors cursor-pointer">
+                        <Upload className="w-3.5 h-3.5 text-blue-400" /> Importar Dados
+                        <input type="file" className="hidden" accept=".json" onChange={handleImportBackup} />
+                      </label>
                     </div>
                   </section>
                 </>
               )}
             </div>
-
-            {/* PREVIEW LATERAL */}
-            <div className="w-[350px] lg:w-[450px] bg-slate-950 border-l border-slate-800 p-4 flex flex-col hidden md:flex shrink-0 p-4 overflow-y-auto custom-scrollbar">
-              <h2 className="text-sm uppercase tracking-widest text-slate-400 font-semibold mb-4 flex items-center gap-2">
-                <Eye className="w-4 h-4" /> Tela dos Jogadores
-              </h2>
-              <div className="w-full h-[300px] lg:h-[400px] rounded-xl overflow-hidden border-4 border-slate-800 relative bg-black shadow-inner mb-4 shrink-0">
-                <SceneRenderer isPreview={true} activeScene={activeScene} />
-              </div>
-
-              {/* --- BLOCO DE NOTAS SECRETO DO MESTRE --- */}
-              <div className="bg-slate-900 border border-red-950 rounded-lg p-4 mb-4 flex flex-col gap-4 shadow-lg">
-                <h3 className="text-xs uppercase tracking-widest text-red-400 font-bold flex items-center gap-2 border-b border-red-950 pb-2">
-                  <EyeOff className="w-3.5 h-3.5 text-red-500" /> Notas Secretas do Mestre
-                </h3>
-                
-                {/* Bloco do Cenário Ativo */}
-                {activeScene.location ? (
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] text-blue-400 uppercase font-extrabold tracking-wider flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span> Cenário: {activeScene.location.name}
-                    </label>
-                    <textarea
-                      value={locations.find(l => l.id === activeScene.location.id)?.secretNotes || ''}
-                      onChange={(e) => updateAssetNotes('locations', activeScene.location.id, e.target.value)}
-                      rows="3"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 focus:border-blue-500 focus:outline-none resize-none custom-scrollbar transition-colors leading-relaxed"
-                      placeholder="Armadilhas, segredos do local, testes de dificuldade (DC), Lore escondida..."
-                    />
-                  </div>
-                ) : (
-                  <div className="text-[11px] text-slate-600 italic bg-slate-950/40 p-2 rounded border border-dashed border-slate-800/60">
-                    Nenhum cenário ativo na mesa.
-                  </div>
-                )}
-
-                {/* Bloco do NPC Ativo */}
-                {activeScene.npc ? (
-                  <div className="flex flex-col gap-1.5 border-t border-slate-800/60 pt-3">
-                    <label className="text-[10px] text-emerald-400 uppercase font-extrabold tracking-wider flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> NPC: {activeScene.npc.name}
-                    </label>
-                    <textarea
-                      value={npcs.find(n => n.id === activeScene.npc.id)?.secretNotes || ''}
-                      onChange={(e) => updateAssetNotes('npcs', activeScene.npc.id, e.target.value)}
-                      rows="3"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-300 focus:border-emerald-500 focus:outline-none resize-none custom-scrollbar transition-colors leading-relaxed"
-                      placeholder="Objetivos ocultos, fraquezas, itens que carrega, linhas de diálogo importantes..."
-                    />
-                  </div>
-                ) : (
-                  <div className="text-[11px] text-slate-600 italic bg-slate-950/40 p-2 rounded border border-dashed border-slate-800/60">
-                    Nenhum NPC ativo na mesa.
-                  </div>
-                )}
-              </div>
-
-              {/* GERENCIAMENTO DE DADOS */}
-              <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 mb-4 shrink-0">
-                <h3 className="text-xs uppercase tracking-widest text-amber-500 font-bold mb-3">Gerenciamento de Dados</h3>
-                <div className="grid grid-cols-2 gap-2">
-                  <button 
-                    onClick={handleExportBackup}
-                    className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 p-2 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition-colors"
-                  >
-                    <Save className="w-3 h-3 text-emerald-400" /> Exportar Dados
-                  </button>
-                  
-                  <label className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 p-2 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition-colors cursor-pointer text-center">
-                    <Upload className="w-3 h-3 text-blue-400" /> Importar Dados
-                    <input type="file" className="hidden" accept=".json" onChange={handleImportBackup} />
-                  </label>
-                </div>
-              </div>
-
-              <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 mt-auto">
-                 <p className="text-slate-400 text-xs leading-relaxed">
-                   Abra uma nova aba neste navegador e selecione "Tela dos Jogadores" para que as suas alterações sejam sincronizadas de forma local e automática.
-                 </p>
-              </div>
-            </div>
           </div>
-        </>
+        </div>
       )}
+
+      {/* COMPONENTE PICTURE-IN-PICTURE (PIP) FLUTUANTE */}
+      <PictureInPicture />
+
+      {/* COMPONENTE FICHA DE PERSONAGEM (MODAL) */}
+      <CharacterSheet />
+
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes fadeInUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
         .animate-fade-in-up { animation: fadeInUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards; }

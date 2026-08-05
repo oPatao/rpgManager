@@ -2,11 +2,102 @@
 import React, { useState, useEffect } from 'react';
 import { Music } from 'lucide-react';
 import { getAssetUrl } from '../services/db';
+import { useRPGStore } from '../store/useRPGStore';
+
+const SINGLE_NPC_POSITION = { left: '50%', width: '28%' };
+
+const NPC_POSITIONS = {
+  1: { left: '37.5%', width: '25%' },   // centro-esquerda
+  2: { left: '62.5%', width: '25%' },  // centro-direita
+  3: { left: '12.5%', width: '25%' },  // longe-esquerda
+  4: { left: '87.5%', width: '25%' },  // longe-direita
+};
+
+const INDEX_TO_POSITION = [1, 2, 3, 4];
+
+const NPCRender = ({ npc, position, globalHideName, showBadge = true }) => {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    const timer = requestAnimationFrame(() => setMounted(true));
+    return () => cancelAnimationFrame(timer);
+  }, []);
+
+  const isFadingOut = npc.isFadingOut;
+  const isHidden = npc.isHidden;
+
+  let opacity = 1;
+  if (isFadingOut || !mounted) {
+    opacity = 0;
+  } else if (isHidden) {
+    opacity = 0.75; // Aumentado em +30% de opacidade conforme solicitado
+  }
+
+  const currentAsset = (npc.variants && npc.variants[npc.variantIndex]) 
+    ? npc.variants[npc.variantIndex] 
+    : npc.fileData;
+  const avatarUrl = getAssetUrl(currentAsset);
+
+  const shouldHideName = globalHideName || npc.hideName;
+
+  return (
+    <div
+      className={`absolute bottom-0 h-[85%] flex flex-col items-center justify-end transition-all duration-500 ease-in-out pointer-events-none -translate-x-1/2 z-20 ${
+        isHidden ? 'border border-white/10 rounded-xl' : ''
+      }`}
+      style={{
+        left: position.left,
+        width: position.width,
+        opacity: opacity,
+      }}
+    >
+      <div className="relative w-full h-full flex items-end justify-center">
+        <img
+          src={avatarUrl}
+          className={`w-full h-full object-contain object-bottom transition-all duration-500 ${
+            isHidden ? 'silhouette' : 'drop-shadow-[0_0_30px_rgba(0,0,0,0.9)]'
+          }`}
+          style={{
+            filter: isHidden ? 'brightness(0) contrast(1)' : 'none',
+          }}
+          alt={npc.name}
+        />
+        {!isHidden && showBadge && (
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/80 backdrop-blur-md px-5 py-2.5 rounded-xl border border-amber-500/50 shadow-2xl max-w-[90%] text-center z-20">
+            <span className="text-white text-xl md:text-3xl font-serif font-bold text-center block truncate drop-shadow-md">
+              {shouldHideName ? '????' : npc.name}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 export const SceneRenderer = ({ isPreview = false, activeScene }) => {
-  const npcName = activeScene.hideNpcName ? "????" : (activeScene.npc?.name || "");
   const showMap = activeScene.isMapMode;
   const shop = activeScene.shop;
+  const locations = useRPGStore(state => state.locations);
+
+  // Lista de NPCs ativos (suporte retroativo ao campo npc único)
+  const activeNPCs = Array.isArray(activeScene.npcs)
+    ? activeScene.npcs
+    : activeScene.npc
+      ? [{
+          id: activeScene.npc.id,
+          name: activeScene.npc.name,
+          fileData: activeScene.npc.fileData,
+          variants: activeScene.npc.variants || [],
+          variantIndex: 0,
+          hideName: activeScene.hideNpcName || false,
+          isHidden: false,
+          isFadingOut: false
+        }]
+      : [];
+
+  const npcName = activeScene.hideNpcName 
+    ? "????" 
+    : (activeNPCs[0]?.name || activeScene.npc?.name || "");
 
   // Lógica de Paginação Automática da Loja
   const [shopPage, setShopPage] = useState(0);
@@ -31,10 +122,15 @@ export const SceneRenderer = ({ isPreview = false, activeScene }) => {
     <div className="relative w-full h-full flex overflow-hidden bg-black">
       
       {/* 0. REFÚGIO E SLOTS DE NPCs */}
-      {activeScene.refuge && (
-        <div className="absolute inset-0 z-10 transition-all duration-1000 ease-in-out bg-cover bg-center" 
-             style={{ backgroundImage: `url(${getAssetUrl(activeScene.refuge.fileData) || '/refugio-padrao.jpg'})` }}> 
-          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-black/80 pointer-events-none" />
+      {activeScene.refuge && (() => {
+        const refugeBg = activeScene.refuge.locationId
+          ? (locations.find(l => l.id === activeScene.refuge.locationId)?.fileData || activeScene.refuge.fileData)
+          : activeScene.refuge.fileData;
+
+        return (
+          <div className="absolute inset-0 z-10 transition-all duration-1000 ease-in-out bg-cover bg-center" 
+               style={{ backgroundImage: `url(${getAssetUrl(refugeBg) || '/refugio-padrao.jpg'})` }}> 
+            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-black/80 pointer-events-none" />
 
           {/* --- HUD DO REFÚGIO (VISÍVEL PARA JOGADORES) --- */}
           {activeScene.refuge.stats && (
@@ -99,7 +195,7 @@ export const SceneRenderer = ({ isPreview = false, activeScene }) => {
             </div>
           )}
 
-          {/* --- SLOTS DOS NPCs (1 a 4) --- */}
+          {/* --- SLOTS DOS NPCs (1 a 4) DO REFÚGIO --- */}
           <div className="absolute bottom-0 w-full h-[75%] flex justify-between items-end px-4 gap-2 z-20 pointer-events-none">
             {(() => {
               const slots = [null, null, null, null];
@@ -126,18 +222,19 @@ export const SceneRenderer = ({ isPreview = false, activeScene }) => {
             })()}
           </div>
         </div>
-      )}
+      );
+      })()}
       {/* 1. FUNDO / MAPA */}
       {activeScene.location && (
         <div className={`absolute inset-0 transition-all duration-1000 ease-in-out ${showMap ? 'bg-contain bg-no-repeat bg-center' : 'bg-cover bg-center'}`}
              style={{ 
                backgroundImage: `url(${getAssetUrl(activeScene.location.fileData)})`,
-               filter: (activeScene.npc && !showMap) ? 'brightness(0.5) blur(2px)' : 'brightness(1)' 
+               filter: (activeNPCs.length > 0 && !showMap) ? 'brightness(0.5) blur(2px)' : 'brightness(1)' 
              }} />
       )}
       
-      {/* 2. LOJA E VENDEDOR (Substitui a visualização normal do NPC) */}
-      {!showMap && activeScene.shop && activeScene.npc && (
+      {/* 2. LOJA E VENDEDOR (Substitui a visualização normal dos NPCs) */}
+      {!showMap && activeScene.shop && activeNPCs.length > 0 && (
         <div className="absolute inset-0 z-[70] flex items-end justify-between p-8 md:p-16 pointer-events-none">
           
           {/* Lado Esquerdo: NPC em pé com Placa de Nome Alinhada */}
@@ -145,7 +242,7 @@ export const SceneRenderer = ({ isPreview = false, activeScene }) => {
              <div className="absolute top-0 bg-[#2c1810]/90 border-2 border-[#8b5a2b] px-8 py-3 rounded shadow-[0_4px_15px_rgba(0,0,0,0.6)] backdrop-blur-md">
                 <h2 className="text-[#e2b879] text-2xl font-serif font-bold tracking-widest uppercase">{npcName}</h2>
              </div>
-             <img src={getAssetUrl(activeScene.npc.fileData)} alt="Vendor" className="w-full h-[90%] object-contain object-bottom drop-shadow-[0_0_40px_rgba(0,0,0,0.9)]" />
+             <img src={getAssetUrl(activeNPCs[0].variants?.[activeNPCs[0].variantIndex] || activeNPCs[0].fileData)} alt="Vendor" className="w-full h-[90%] object-contain object-bottom drop-shadow-[0_0_40px_rgba(0,0,0,0.9)]" />
           </div>
 
           {/* Lado Direito: Quadro da Loja */}
@@ -190,21 +287,56 @@ export const SceneRenderer = ({ isPreview = false, activeScene }) => {
         </div>
       )}
 
-      {/* 3. RENDERIZA NPC NORMAL (Apenas se a loja NÃO estiver ativa) */}
-      {!showMap && activeScene.npc && !activeScene.shop && (
-        <>
-          <div className={`absolute bottom-0 left-[0%] md:left-[2%] h-[85%] w-[65%] md:w-[55%] flex items-end justify-center pointer-events-none ${isPreview ? 'animate-none' : 'animate-fade-in-up'}`}>
-            <img src={getAssetUrl(activeScene.npc.fileData)} alt="NPC" className="w-full h-full object-contain object-bottom drop-shadow-[0_0_40px_rgba(0,0,0,0.9)]" />
-          </div>
-          <div className="absolute bottom-12 right-[5%] w-[45%] z-20 pointer-events-none">
-             <div className="bg-gradient-to-r from-black/90 to-slate-900/90 backdrop-blur-md border-t-4 border-l-4 border-amber-600 rounded-tr-3xl p-6 md:p-8 shadow-2xl pointer-events-auto">
-               <h2 className="text-amber-500 text-3xl md:text-5xl font-serif font-bold tracking-wider mb-2 drop-shadow-lg">{npcName}</h2>
-               {!activeScene.hideNpcName && activeScene.npc.role && <p className="text-slate-400 text-sm uppercase tracking-widest font-semibold mb-4">{activeScene.npc.role}</p>}
-               {activeScene.npc.desc && <p className="text-slate-200 text-lg md:text-xl leading-relaxed italic border-l-2 border-slate-700 pl-4">"{activeScene.npc.desc}"</p>}
-             </div>
-          </div>
-        </>
-      )}
+      {/* 3. RENDERIZA MÚLTIPLOS NPCs (Até 4 slots) */}
+      {!showMap && !activeScene.shop && !activeScene.cutscene && !activeScene.handout && activeNPCs.length > 0 && (() => {
+        const visibleNPCs = activeNPCs.filter(n => !n.isFadingOut);
+        const isSingleNPC = visibleNPCs.length === 1;
+
+        return (
+          <>
+            {activeNPCs.map((npc, index) => {
+              const posKey = INDEX_TO_POSITION[index] || 1;
+              const position = isSingleNPC ? SINGLE_NPC_POSITION : NPC_POSITIONS[posKey];
+              return (
+                <NPCRender
+                  key={npc.id}
+                  npc={npc}
+                  position={position}
+                  globalHideName={activeScene.hideNpcName}
+                  showBadge={!isSingleNPC}
+                />
+              );
+            })}
+
+            {/* Se houver apenas 1 NPC ativo na cena, exibe a placa clássica no canto inferior direito */}
+            {isSingleNPC && (() => {
+              const singleNpc = visibleNPCs[0];
+              const shouldHideSingleName = activeScene.hideNpcName || singleNpc.hideName;
+              const singleName = shouldHideSingleName ? "????" : singleNpc.name;
+
+              return (
+                <div className="absolute bottom-12 right-[5%] w-[45%] z-20 pointer-events-none animate-fade-in-up">
+                  <div className="bg-gradient-to-r from-black/90 to-slate-900/90 backdrop-blur-md border-t-4 border-l-4 border-amber-600 rounded-tr-3xl p-6 md:p-8 shadow-2xl pointer-events-auto">
+                    <h2 className="text-amber-500 text-4xl md:text-6xl font-serif font-bold tracking-wider mb-2 drop-shadow-lg">
+                      {singleName}
+                    </h2>
+                    {!shouldHideSingleName && singleNpc.role && (
+                      <p className="text-slate-400 text-sm uppercase tracking-widest font-semibold mb-4">
+                        {singleNpc.role}
+                      </p>
+                    )}
+                    {singleNpc.desc && (
+                      <p className="text-slate-200 text-lg md:text-xl leading-relaxed italic border-l-2 border-slate-700 pl-4">
+                        "{singleNpc.desc}"
+                      </p>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+          </>
+        );
+      })()}
 
       {/* 2.5 HANDOUT (Exibição Central de Itens/Documentos) */}
       {activeScene.handout && (
