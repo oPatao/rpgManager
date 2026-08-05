@@ -1,5 +1,5 @@
 // src/components/SceneRenderer.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Music } from 'lucide-react';
 import { getAssetUrl } from '../services/db';
 import { useRPGStore } from '../store/useRPGStore';
@@ -16,33 +16,28 @@ const NPC_POSITIONS = {
 const INDEX_TO_POSITION = [1, 2, 3, 4];
 
 const NPCRender = ({ npc, position, globalHideName, showBadge = true }) => {
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    const timer = requestAnimationFrame(() => setMounted(true));
-    return () => cancelAnimationFrame(timer);
-  }, []);
-
   const isFadingOut = npc.isFadingOut;
   const isHidden = npc.isHidden;
-
-  let opacity = 1;
-  if (isFadingOut || !mounted) {
-    opacity = 0;
-  } else if (isHidden) {
-    opacity = 0.75; // Aumentado em +30% de opacidade conforme solicitado
-  }
 
   const currentAsset = (npc.variants && npc.variants[npc.variantIndex]) 
     ? npc.variants[npc.variantIndex] 
     : npc.fileData;
-  const avatarUrl = getAssetUrl(currentAsset);
+
+  // MEMOIZAÇÃO DA URL: Impede o recarregamento do avatar a cada clique/re-render
+  const avatarUrl = useMemo(() => getAssetUrl(currentAsset), [currentAsset]);
+
+  let opacity = 1;
+  if (isFadingOut) {
+    opacity = 0;
+  } else if (isHidden) {
+    opacity = 0.75;
+  }
 
   const shouldHideName = globalHideName || npc.hideName;
 
   return (
     <div
-      className={`absolute bottom-0 h-[85%] flex flex-col items-center justify-end transition-all duration-500 ease-in-out pointer-events-none -translate-x-1/2 z-20 ${
+      className={`absolute bottom-0 h-[85%] flex flex-col items-center justify-end transition-[left,width,opacity] duration-300 ease-in-out pointer-events-none -translate-x-1/2 z-20 ${
         isHidden ? 'border border-white/10 rounded-xl' : ''
       }`}
       style={{
@@ -54,7 +49,7 @@ const NPCRender = ({ npc, position, globalHideName, showBadge = true }) => {
       <div className="relative w-full h-full flex items-end justify-center">
         <img
           src={avatarUrl}
-          className={`w-full h-full object-contain object-bottom transition-all duration-500 ${
+          className={`w-full h-full object-contain object-bottom transition-opacity duration-300 ${
             isHidden ? 'silhouette' : 'drop-shadow-[0_0_30px_rgba(0,0,0,0.9)]'
           }`}
           style={{
