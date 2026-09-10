@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Users, Map, Package, Music, Film, Keyboard } from 'lucide-react';
+import { Users, Map, Package, Music, Film, Keyboard, Dice5 } from 'lucide-react';
 import { useRPGStore } from '../store/useRPGStore';
 import { KeyboardShortcutsHelpModal } from './KeyboardShortcuts';
 
@@ -15,6 +15,7 @@ export const TopNav = () => {
   const role = useRPGStore(state => state.role);
   const uiState = useRPGStore(state => state.uiState);
   const setUiState = useRPGStore(state => state.setUiState);
+  const setNpcGeneratorState = useRPGStore(state => state.setNpcGeneratorState);
   const [showHelpModal, setShowHelpModal] = useState(false);
 
   if (role !== 'master') return null;
@@ -53,14 +54,25 @@ export const TopNav = () => {
           })}
         </div>
 
-        <button
-          onClick={() => setShowHelpModal(true)}
-          title="Ver Atalhos de Teclado"
-          className="p-2 bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-amber-400 border border-slate-700/50 rounded-xl transition-colors flex items-center gap-1.5 shrink-0 text-xs"
-        >
-          <Keyboard className="w-4 h-4 text-amber-500" />
-          <span className="hidden md:inline font-medium">Atalhos</span>
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => setNpcGeneratorState({ isOpen: true })}
+            title="Abrir Gerador de NPCs (Motivações 6×6)"
+            className="p-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-xl transition-colors flex items-center gap-1.5 text-xs font-semibold cursor-pointer shadow-sm"
+          >
+            <Dice5 className="w-4 h-4 text-amber-400" />
+            <span className="hidden sm:inline">Gerar NPC</span>
+          </button>
+
+          <button
+            onClick={() => setShowHelpModal(true)}
+            title="Ver Atalhos de Teclado"
+            className="p-2 bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-amber-400 border border-slate-700/50 rounded-xl transition-colors flex items-center gap-1.5 shrink-0 text-xs"
+          >
+            <Keyboard className="w-4 h-4 text-amber-500" />
+            <span className="hidden md:inline font-medium">Atalhos</span>
+          </button>
+        </div>
       </div>
 
       <KeyboardShortcutsHelpModal 

@@ -10,6 +10,7 @@ export const useRPGStore = create((set, get) => ({
   audioProgress: { time: 0, duration: 0 },
   modalState: { isOpen: false, type: null, data: null },
   sheetModalState: { isOpen: false, npcId: null },
+  npcGeneratorState: { isOpen: false },
   combatState: { round: 1, activeId: null },
   activeConflict: null,
   pipState: {
@@ -44,6 +45,7 @@ export const useRPGStore = create((set, get) => ({
   setQueuedTrackId: (id) => set({ queuedTrackId: id }),
   setModalState: (modalState) => set({ modalState }),
   setSheetModalState: (sheetModalState) => set({ sheetModalState }),
+  setNpcGeneratorState: (npcGeneratorState) => set({ npcGeneratorState }),
   updateNPCSheet: async (npcId, sheet) => {
     const npcs = get().npcs || [];
     const updatedNpcs = npcs.map(npc =>

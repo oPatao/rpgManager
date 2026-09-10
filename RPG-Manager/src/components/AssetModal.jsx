@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, Trash2, FileText } from 'lucide-react';
+import { X, Save, Trash2, FileText, Dice5 } from 'lucide-react';
 import { useRPGStore } from '../store/useRPGStore';
 import { localDB, generateId, fileToDataUrl, getAssetUrl } from '../services/db';
 
@@ -8,6 +8,7 @@ export const AssetModal = () => {
   const modalState = useRPGStore(state => state.modalState);
   const setModalState = useRPGStore(state => state.setModalState);
   const setSheetModalState = useRPGStore(state => state.setSheetModalState);
+  const setNpcGeneratorState = useRPGStore(state => state.setNpcGeneratorState);
   const activeCampaignId = useRPGStore(state => state.activeCampaignId);
   const activeScene = useRPGStore(state => state.activeScene);
   const publishScene = useRPGStore(state => state.publishScene);
@@ -43,9 +44,11 @@ export const AssetModal = () => {
     
     try {
       const formData = new FormData(e.target);
-      const isEditing = !!modalState.data;
+      const isEditing = Boolean(modalState.data?.id);
 
-      const data = isEditing ? { ...modalState.data } : { id: generateId(), campaignId: activeCampaignId };
+      const data = isEditing
+        ? { ...modalState.data }
+        : { id: generateId(), campaignId: activeCampaignId, ...(modalState.data || {}) };
       data.name = formData.get('name');
       data.folder = formData.get('folder')?.trim() || '';
       
@@ -62,6 +65,7 @@ export const AssetModal = () => {
       if (modalState.type === 'npc') {
         data.role = formData.get('role');
         data.desc = formData.get('desc');
+        data.notes = formData.get('notes') || modalState.data?.notes || '';
         data.type = formData.get('npcType') || 'npc';
         data.inParty = formData.get('inParty') === 'on';
       }
@@ -181,7 +185,7 @@ export const AssetModal = () => {
 
   if (!modalState.isOpen) return null;
   const titles = { campaign: 'Nova Campanha', location: 'Novo Cenário', npc: 'Novo NPC', track: 'Nova Música / Som', combatant: 'Adicionar à Iniciativa', handout: 'Novo Handout / Item', shop: 'Nova Loja / Mercador', refuge: 'Novo Refúgio' };
-  const isEditing = !!modalState.data;
+  const isEditing = Boolean(modalState.data?.id);
 
   return (
       <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -229,8 +233,24 @@ export const AssetModal = () => {
                 </div>
                 <div className="flex flex-col gap-1">
                   <label className="text-xs text-slate-400 uppercase font-bold">Descrição Oculta (Apenas Mestre)</label>
-                  <textarea name="desc" defaultValue={modalState.data?.desc} rows="2" className="bg-slate-950 border border-slate-700 rounded-lg p-3 text-white text-sm" placeholder="Opcional..." />
+                  <textarea name="desc" defaultValue={modalState.data?.desc} rows="3" className="bg-slate-950 border border-slate-700 rounded-lg p-3 text-white text-sm" placeholder="Opcional..." />
                 </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs text-slate-400 uppercase font-bold">Notas de Infecção / Regras (Mestre)</label>
+                  <input name="notes" defaultValue={modalState.data?.notes || ''} className="bg-slate-950 border border-slate-700 rounded-lg p-3 text-white text-sm" placeholder="Ex: Infectado — Braço direito: placas quitinosas" />
+                </div>
+                {!isEditing && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModalState({ isOpen: false, type: null, data: null });
+                      setNpcGeneratorState({ isOpen: true });
+                    }}
+                    className="bg-amber-950/40 hover:bg-amber-900/60 text-amber-400 border border-amber-800/60 py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <Dice5 className="w-3.5 h-3.5" /> Abrir Gerador de NPCs (Motivação 6×6)
+                  </button>
+                )}
                 <div className="flex items-center gap-2.5 bg-slate-950 p-3 rounded-xl border border-slate-800">
                   <input
                     type="checkbox"

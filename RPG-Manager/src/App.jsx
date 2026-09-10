@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Monitor, Users, Map, User, EyeOff, Eye, Music, Play, Square, Repeat, FastForward, Clock, Plus, Trash2, Folder, X, Save, Upload, Wind, FileText, Store, Pencil, FolderOpen, ChevronLeft,Shield, Home, Battery, RefreshCw, Tag } from 'lucide-react';
+import { Monitor, Users, Map, User, EyeOff, Eye, Music, Play, Square, Repeat, FastForward, Clock, Plus, Trash2, Folder, X, Save, Upload, Wind, FileText, Store, Pencil, FolderOpen, ChevronLeft, Shield, Home, Battery, RefreshCw, Tag, Dice5 } from 'lucide-react';
 
 // IMPORTAÇÃO CORRIGIDA: getAssetUrl adicionado!
 import { localDB, getAllDataForBackup, importBackup, generateId, fileToDataUrl, getAssetUrl } from './services/db';
@@ -7,6 +7,7 @@ import { AudioManager, formatTime } from './components/AudioManager';
 import { AmbientManager } from './components/AmbientManager';
 import { SceneRenderer } from './components/SceneRenderer';
 import { AssetModal } from './components/AssetModal';
+import { NPCGenerator } from './components/NPCGenerator';
 import { ConflictTracker } from './components/conflict/ConflictTracker';
 import { PictureInPicture } from './components/PictureInPicture';
 import { CharacterSheet } from './components/CharacterSheet';
@@ -55,7 +56,8 @@ export default function App() {
     combatState, loadData, publishScene, deleteAsset, setModalState, setSheetModalState, updateCollection,
     conflicts, activeConflict, saveConflict, deleteConflict, startConflict, endConflict, updateActiveConflict,
     partyTrackerState, toggleNPCParty, uiState,
-    addNPCToScene, removeNPCFromScene, toggleNPCHidden, switchNPCVariant, toggleNPCName
+    addNPCToScene, removeNPCFromScene, toggleNPCHidden, switchNPCVariant, toggleNPCName,
+    npcGeneratorState, setNpcGeneratorState
   } = useRPGStore();
 
   // Carrega os dados na primeira vez
@@ -378,6 +380,48 @@ export default function App() {
         </>
       )}
       <AssetModal />
+      <NPCGenerator
+        isOpen={npcGeneratorState?.isOpen || false}
+        onClose={() => setNpcGeneratorState({ isOpen: false })}
+        onCreateNPC={(generatedNpc) => {
+          setNpcGeneratorState({ isOpen: false });
+          const prefilledData = {
+            name: `${generatedNpc.name} ${generatedNpc.surname}`,
+            role: `${generatedNpc.origin === 'cidadao' ? 'Cidadão' : generatedNpc.origin === 'indigena' ? 'Indígena' : 'Outro'} • ${generatedNpc.infectionStatus === 'nao_infectado' ? 'Saudável' : generatedNpc.infectionStatus === 'infectado_avancado' ? 'Infectado Avançado' : 'Infectado'}`,
+            desc: `${generatedNpc.characteristic}\n\n${generatedNpc.behavior}\n\nOpinião: ${generatedNpc.initialOpinion}\nMotivação: ${generatedNpc.motivation}`,
+            notes: generatedNpc.infectionStatus !== 'nao_infectado'
+              ? `Infectado — ${generatedNpc.modifiedBodyPart}: ${generatedNpc.modificationDescription}`
+              : '',
+            type: 'npc',
+            inParty: false,
+            sheet: {
+              aptitudes: {
+                instintos: { influencia: 1, percepcao: 1, potencia: 1, reacao: 1, resolucao: 1, sagacidade: 1 },
+                conhecimentos: { biologia: 0, erudicao: 0, engenharia: 0, geografia: 0, medicina: 0, seguranca: 0 },
+                praticas: { armas: 0, atletismo: 0, expressao: 0, furtividade: 0, manufaturas: 0, sobrevivencia: 0 }
+              },
+              caboGuerra: generatedNpc.infectionStatus === 'infectado_avancado'
+                ? { determinacao: 3, assimilacao: 7 }
+                : generatedNpc.infectionStatus === 'infectado'
+                ? { determinacao: 6, assimilacao: 4 }
+                : { determinacao: 9, assimilacao: 1 },
+              saude: { nivel: 6, pontosAtuais: null, pontosMaximos: null },
+              caracteristicas: generatedNpc.infectionStatus !== 'nao_infectado'
+                ? [
+                    {
+                      id: Date.now().toString(),
+                      name: `Mutação: ${generatedNpc.modifiedBodyPart} (${generatedNpc.modificationDescription})`,
+                      cost: generatedNpc.infectionStatus === 'infectado_avancado' ? 3 : 1
+                    }
+                  ]
+                : [],
+              pontosCaracteristicas: 7,
+              equipamentos: ''
+            }
+          };
+          setModalState({ isOpen: true, type: 'npc', data: prefilledData });
+        }}
+      />
       
 
       {role === 'player' ? (
@@ -801,6 +845,13 @@ export default function App() {
                         >
                           <Upload className="w-3 h-3" /> Fazer Upload
                         </button>
+                        <button 
+                          onClick={() => setNpcGeneratorState({ isOpen: true })}
+                          className="bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-xs px-2.5 py-1 rounded flex items-center gap-1.5 border border-amber-400 shadow-sm transition-colors cursor-pointer"
+                          title="Abrir Gerador de NPCs com Matriz 6×6"
+                        >
+                          <Dice5 className="w-3.5 h-3.5" /> Gerar NPC
+                        </button>
                       </div>
                       <label className="flex items-center gap-2 text-sm text-amber-400 font-bold bg-amber-900/20 px-3 py-1 rounded cursor-pointer border border-amber-900/50 hover:bg-amber-900/40">
                         <input type="checkbox" checked={activeScene.hideNpcName} onChange={(e) => updateSceneElement('hideNpcName', e.target.checked)} className="accent-amber-500" />
@@ -1049,9 +1100,18 @@ export default function App() {
 
                               return (
                                 <div>
-                                  <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-widest mb-3 border-b border-emerald-900/30 pb-1 flex items-center gap-2">
-                                    <div className="w-2 h-2 rounded-full bg-emerald-500"></div> Personagens Neutros / Aliados
-                                  </h3>
+                                  <div className="flex items-center justify-between mb-3 border-b border-emerald-900/30 pb-1">
+                                    <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-widest flex items-center gap-2">
+                                      <div className="w-2 h-2 rounded-full bg-emerald-500"></div> Personagens Neutros / Aliados
+                                    </h3>
+                                    <button 
+                                      onClick={() => setNpcGeneratorState({ isOpen: true })}
+                                      className="bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 text-xs px-2 py-0.5 rounded flex items-center gap-1 border border-amber-500/30 transition-colors cursor-pointer"
+                                      title="Abrir Gerador de NPCs"
+                                    >
+                                      <Dice5 className="w-3 h-3" /> Gerar NPC
+                                    </button>
+                                  </div>
                                   
                                   {activeFolderNpcs && (
                                     <div className="flex items-center gap-2 mb-4">
