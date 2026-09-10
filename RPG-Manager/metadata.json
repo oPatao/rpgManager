@@ -1,0 +1,6 @@
+{
+  "name": "RPG Manager",
+  "description": "Gerenciador de RPG de mesa com controle de áudio, efeitos sonoros ambiente, visualizador de cenas e gestão de recursos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

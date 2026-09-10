@@ -1,84 +1,183 @@
 import React, { useEffect, useRef } from 'react';
 import { getAssetUrl } from '../services/db';
+import { useRPGStore } from '../store/useRPGStore';
 
-export const formatTime = (seconds) => {
-  if (isNaN(seconds) || seconds === null || seconds === undefined || seconds < 0) return '00:00';
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+export const formatTime = (timeInSeconds) => {
+  if (!timeInSeconds || isNaN(timeInSeconds)) return "0:00";
+  const m = Math.floor(timeInSeconds / 60);
+  const s = Math.floor(timeInSeconds % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
 };
 
-export const AudioManager = ({ audioState, setAudioProgress, tracksList = [] }) => {
-  const audioRef = useRef(null);
-
-  const activeTrack = tracksList.find(t => t.id === audioState?.trackId);
+export const AudioManager = ({ audioState, setAudioProgress, tracksList }) => {
+  const player1 = useRef(null);
+  const player2 = useRef(null);
+  const activePlayer = useRef(1);
+  const tracksRef = useRef([]);
+  const fadeOutInterval = useRef(null);
+  const fadeInInterval = useRef(null);
 
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
+     tracksRef.current = tracksList;
+  }, [tracksList]);
 
-    if (activeTrack?.fileData) {
-      const src = getAssetUrl(activeTrack.fileData);
-      if (audio.src !== src) {
-        audio.src = src;
-        audio.currentTime = 0;
+  const clearFades = () => {
+    if (fadeOutInterval.current) {
+      clearInterval(fadeOutInterval.current);
+      fadeOutInterval.current = null;
+    }
+    if (fadeInInterval.current) {
+      clearInterval(fadeInInterval.current);
+      fadeInInterval.current = null;
+    }
+  };
+
+  useEffect(() => {
+    player1.current = new Audio();
+    player2.current = new Audio();
+
+    const progressInterval = setInterval(() => {
+      const current = activePlayer.current === 1 ? player1.current : player2.current;
+      if (current && !current.paused) {
+        const dur = current.duration === Infinity ? Infinity : (isFinite(current.duration) ? current.duration : 0);
+        setAudioProgress({ time: current.currentTime || 0, duration: dur });
       }
-      audio.loop = audioState?.loop ?? true;
-      audio.volume = typeof audioState?.volume === 'number' ? audioState.volume : 1;
-      audio.play().catch(err => console.warn('Autoplay prevented:', err));
-    } else {
-      audio.pause();
-      audio.src = '';
-      if (setAudioProgress) setAudioProgress({ time: 0, duration: 0 });
-    }
-  }, [activeTrack?.id, activeTrack?.fileData]);
+    }, 1000);
 
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (typeof audioState?.volume === 'number') {
-      audio.volume = Math.max(0, Math.min(1, audioState.volume));
-    }
-  }, [audioState?.volume]);
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (typeof audioState?.seekEvent === 'number') {
-      audio.currentTime = audioState.seekEvent;
-    }
-  }, [audioState?.seekEvent]);
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const handleTimeUpdate = () => {
-      if (setAudioProgress) {
-        setAudioProgress({
-          time: audio.currentTime || 0,
-          duration: audio.duration || 0
-        });
+    // Monitora término de faixa para transição automática da fila ("Mudar ao final dessa música")
+    const handleTrackEnded = () => {
+      const queuedId = useRPGStore.getState().queuedTrackId;
+      if (queuedId) {
+        window.dispatchEvent(new CustomEvent('rpg-auto-next-track', { detail: { nextTrackId: queuedId } }));
       }
     };
 
-    const handleLoadedMetadata = () => {
-      if (setAudioProgress) {
-        setAudioProgress(prev => ({
-          ...prev,
-          duration: audio.duration || 0
-        }));
-      }
-    };
-
-    audio.addEventListener('timeupdate', handleTimeUpdate);
-    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+    const p1 = player1.current;
+    const p2 = player2.current;
+    p1.addEventListener('ended', handleTrackEnded);
+    p2.addEventListener('ended', handleTrackEnded);
 
     return () => {
-      audio.removeEventListener('timeupdate', handleTimeUpdate);
-      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      clearInterval(progressInterval);
+      clearFades();
+      p1.removeEventListener('ended', handleTrackEnded);
+      p2.removeEventListener('ended', handleTrackEnded);
+      p1.pause();
+      p2.pause();
     };
   }, [setAudioProgress]);
 
-  return <audio ref={audioRef} className="hidden" preload="auto" />;
+  // Altera o volume da trilha ativa em tempo real se o mestre mexer no slider
+  useEffect(() => {
+    if (!player1.current || !player2.current) return;
+    const current = activePlayer.current === 1 ? player1.current : player2.current;
+    if (current && !current.paused && audioState?.volume !== undefined) {
+      current.volume = audioState.volume;
+    }
+  }, [audioState?.volume]);
+
+  const fadeOut = (audioElement, stepTime = 80) => {
+    if (!audioElement || audioElement.paused) return;
+    if (fadeOutInterval.current) clearInterval(fadeOutInterval.current);
+    fadeOutInterval.current = setInterval(() => {
+      let newVol = audioElement.volume - 0.1;
+      if (newVol > 0.05) {
+        audioElement.volume = newVol;
+      } else {
+        audioElement.volume = 0;
+        audioElement.pause();
+        audioElement.currentTime = 0;
+        clearInterval(fadeOutInterval.current);
+        fadeOutInterval.current = null;
+      }
+    }, stepTime);
+  };
+
+  const fadeIn = (audioElement, targetVolume = 1, stepTime = 80) => {
+    if (!audioElement) return;
+    if (fadeInInterval.current) clearInterval(fadeInInterval.current);
+    audioElement.volume = 0;
+    fadeInInterval.current = setInterval(() => {
+      let newVol = audioElement.volume + 0.1;
+      if (newVol < targetVolume - 0.05) {
+        audioElement.volume = newVol;
+      } else {
+        audioElement.volume = targetVolume;
+        clearInterval(fadeInInterval.current);
+        fadeInInterval.current = null;
+      }
+    }, stepTime);
+  };
+
+  useEffect(() => {
+    if (!player1.current || !player2.current) return;
+    const current = activePlayer.current === 1 ? player1.current : player2.current;
+    const next = activePlayer.current === 1 ? player2.current : player1.current;
+
+    // Caso de parar trilha (trackId nulo)
+    if (!audioState?.trackId) {
+      if (audioState?.transition === 'instant') {
+        clearFades();
+        if (player1.current) { player1.current.pause(); player1.current.currentTime = 0; }
+        if (player2.current) { player2.current.pause(); player2.current.currentTime = 0; }
+      } else {
+        fadeOut(player1.current);
+        fadeOut(player2.current);
+      }
+      setAudioProgress({ time: 0, duration: 0 });
+      return;
+    }
+
+    const trackInfo = tracksRef.current.find(t => t.id === audioState.trackId);
+    if (trackInfo) {
+      const srcUrl = getAssetUrl(trackInfo.fileData);
+      next.src = srcUrl;
+      next.loop = !!audioState.loop;
+      const targetVolume = audioState.volume !== undefined ? audioState.volume : 1;
+
+      // 1. MUDAR INSTANTANEAMENTE (Corte Seco)
+      if (audioState?.transition === 'instant') {
+        clearFades();
+        if (current) {
+          current.pause();
+          current.currentTime = 0;
+        }
+        next.volume = targetVolume;
+        const playPromise = next.play();
+        if (playPromise !== undefined) {
+          playPromise.then(() => {
+            activePlayer.current = activePlayer.current === 1 ? 2 : 1;
+          }).catch(e => console.log("Autoplay bloqueado:", e));
+        }
+      } else {
+        // 2. TRANSIÇÃO SUAVE NA HORA (Fade In / Fade Out - Crossfade)
+        clearFades();
+        next.volume = 0;
+        const playPromise = next.play();
+        if (playPromise !== undefined) {
+          playPromise.then(() => {
+            fadeIn(next, targetVolume);
+            fadeOut(current);
+            activePlayer.current = activePlayer.current === 1 ? 2 : 1;
+          }).catch(e => console.log("Autoplay bloqueado:", e));
+        }
+      }
+    }
+  }, [audioState?.trackId, audioState?.playTimestamp]);
+  
+  useEffect(() => {
+      const current = activePlayer.current === 1 ? player1.current : player2.current;
+      if (current && audioState) current.loop = audioState.loop;
+  }, [audioState?.loop]);
+
+  useEffect(() => {
+    if (audioState?.seekEvent) {
+      const current = activePlayer.current === 1 ? player1.current : player2.current;
+      if (current && Math.abs(current.currentTime - audioState.seekEvent.time) > 2) {
+          current.currentTime = audioState.seekEvent.time;
+      }
+    }
+  }, [audioState?.seekEvent]);
+
+  return null;
 };

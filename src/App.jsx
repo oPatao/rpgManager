@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Monitor, Users, Map, User, EyeOff, Eye, Music, Play, Square, Repeat, FastForward, Clock, Plus, Trash2, Folder, X, Save, Upload, Wind, FileText, Store, Pencil, FolderOpen, ChevronLeft, Shield, Home, Battery, RefreshCw, Tag, Dice5 } from 'lucide-react';
+import { Monitor, Users, Map, User, EyeOff, Eye, Music, Play, Square, Repeat, FastForward, Clock, Plus, Trash2, Folder, X, Save, Upload, Wind, FileText, Store, Pencil, FolderOpen, ChevronLeft, Shield, Home, Battery, RefreshCw, Tag, Dice5, Radio, Zap } from 'lucide-react';
 
 // IMPORTAÇÃO CORRIGIDA: getAssetUrl adicionado!
 import { localDB, getAllDataForBackup, importBackup, generateId, fileToDataUrl, getAssetUrl } from './services/db';
@@ -7,7 +7,7 @@ import { AudioManager, formatTime } from './components/AudioManager';
 import { AmbientManager } from './components/AmbientManager';
 import { SceneRenderer } from './components/SceneRenderer';
 import { AssetModal } from './components/AssetModal';
-import { NPCGenerator } from './components/master/NPCGenerator';
+import { NPCGenerator } from './components/NPCGenerator';
 import { ConflictTracker } from './components/conflict/ConflictTracker';
 import { PictureInPicture } from './components/PictureInPicture';
 import { CharacterSheet } from './components/CharacterSheet';
@@ -53,6 +53,7 @@ export default function App() {
     role, isLoading, setRole, activeCampaignId, setActiveCampaignId,
     campaigns, locations, npcs, tracks, combatants, cutscenes, handouts, shops,
     activeScene, queuedTrackId, setQueuedTrackId,
+    audioTransitionMode, setAudioTransitionMode,
     combatState, loadData, publishScene, deleteAsset, setModalState, setSheetModalState, updateCollection,
     conflicts, activeConflict, saveConflict, deleteConflict, startConflict, endConflict, updateActiveConflict,
     partyTrackerState, toggleNPCParty, uiState,
@@ -165,8 +166,92 @@ export default function App() {
   const handleVolumeCommit = (e) => publishAudioOnly({ ...activeScene.audio, volume: parseFloat(e.target.value) }, undefined);
 
   const toggleLoop = (e) => publishAudioOnly({ ...activeScene.audio, loop: e.target.checked }, undefined);
-  const stopAudio = () => { publishAudioOnly({ ...activeScene.audio, trackId: null, seekEvent: null }, undefined); setQueuedTrackId(null); };
-  const executeTransition = () => { if (queuedTrackId) { publishAudioOnly({ ...activeScene.audio, trackId: queuedTrackId, seekEvent: 0 }, undefined); setQueuedTrackId(null); } };
+  const stopAudio = () => { 
+    publishAudioOnly({ ...activeScene.audio, trackId: null, seekEvent: null, transition: 'instant' }, undefined); 
+    setQueuedTrackId(null); 
+  };
+  
+  // Transição da faixa enfileirada para tocar agora
+  const executeTransition = (transitionType = 'fade') => { 
+    if (queuedTrackId) { 
+      publishAudioOnly({ 
+        ...activeScene.audio, 
+        trackId: queuedTrackId, 
+        seekEvent: { time: 0, id: Date.now() }, 
+        transition: transitionType, 
+        loop: true,
+        playTimestamp: Date.now() 
+      }, undefined); 
+      setQueuedTrackId(null); 
+    } 
+  };
+
+  // Disparo de faixas principais com suporte aos 3 modos: 'instant', 'fade', 'end'
+  const playTrackWithTransition = (trackId, mode = audioTransitionMode) => {
+    if (mode === 'end') {
+      if (!activeScene.audio?.trackId) {
+        // Se nenhuma música tocando no momento, inicia diretamente
+        publishAudioOnly({
+          ...activeScene.audio,
+          trackId: trackId,
+          seekEvent: { time: 0, id: Date.now() },
+          transition: 'fade',
+          loop: true,
+          playTimestamp: Date.now()
+        }, undefined);
+        setQueuedTrackId(null);
+      } else {
+        // Se já há uma música tocando, enfileira e desativa o loop da atual para que ela chegue ao fim
+        setQueuedTrackId(trackId);
+        publishAudioOnly({
+          ...activeScene.audio,
+          loop: false
+        }, undefined);
+      }
+    } else if (mode === 'instant') {
+      // 1. Mudar Instantaneamente (Corte Seco)
+      setQueuedTrackId(null);
+      publishAudioOnly({
+        ...activeScene.audio,
+        trackId: trackId,
+        seekEvent: { time: 0, id: Date.now() },
+        transition: 'instant',
+        loop: true,
+        playTimestamp: Date.now()
+      }, undefined);
+    } else {
+      // 2. Fazer Transição Fade In/Fade Out na hora (Crossfade)
+      setQueuedTrackId(null);
+      publishAudioOnly({
+        ...activeScene.audio,
+        trackId: trackId,
+        seekEvent: { time: 0, id: Date.now() },
+        transition: 'fade',
+        loop: true,
+        playTimestamp: Date.now()
+      }, undefined);
+    }
+  };
+
+  // Escuta término da faixa ativa para transicionar automaticamente para a música enfileirada
+  useEffect(() => {
+    const handleAutoNext = (e) => {
+      const nextId = e.detail?.nextTrackId;
+      if (nextId) {
+        publishAudioOnly({
+          ...useRPGStore.getState().activeScene?.audio,
+          trackId: nextId,
+          seekEvent: { time: 0, id: Date.now() },
+          transition: 'fade',
+          loop: true,
+          playTimestamp: Date.now()
+        }, undefined);
+        setQueuedTrackId(null);
+      }
+    };
+    window.addEventListener('rpg-auto-next-track', handleAutoNext);
+    return () => window.removeEventListener('rpg-auto-next-track', handleAutoNext);
+  }, []);
 
   // --- CONTROLES DE SOM AMBIENTE ---
   const handleAmbientVolumeChange = (e) => {
@@ -503,38 +588,117 @@ export default function App() {
                         </div>
 
                         {/* SUB-PAINEL 1: CONTROLES DA TRILHA SONORA */}
-                        <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 flex flex-wrap justify-between items-center gap-2">
-                          <div className="flex items-center gap-2">
-                            <Play className="w-4 h-4 text-purple-400 fill-current" />
-                            <span className="text-xs font-bold uppercase tracking-wider text-slate-300">Trilha Principal:</span>
-                            <span className="text-xs text-purple-300 italic truncate max-w-[150px]">
-                              {tracks.find(t => t.id === activeScene.audio?.trackId)?.name || "Nenhuma tocando"}
-                            </span>
-                          </div>
-                          <div className="flex gap-4 items-center ml-auto">
-                            <div className="flex items-center gap-2 bg-slate-950/60 px-2 py-1 rounded border border-slate-800">
-                              <span className="text-[10px] text-slate-400 font-bold uppercase">Vol:</span>
-                              <input type="range" min="0" max="1" step="0.05" 
-                                value={activeScene.audio?.volume !== undefined ? activeScene.audio.volume : 1} 
-                                onChange={handleVolumeChange} 
-                                onMouseUp={handleVolumeCommit} 
-                                onTouchEnd={handleVolumeCommit} 
-                                className="w-16 md:w-24 accent-purple-500 h-1 bg-slate-800 rounded appearance-none cursor-pointer" />
+                        <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 flex flex-col gap-3">
+                          <div className="flex flex-wrap justify-between items-center gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <Play className="w-4 h-4 text-purple-400 fill-current shrink-0" />
+                              <span className="text-xs font-bold uppercase tracking-wider text-slate-300 shrink-0">Trilha Principal:</span>
+                              <span className="text-xs text-purple-300 italic truncate max-w-[180px]">
+                                {tracks.find(t => t.id === activeScene.audio?.trackId)?.name || "Nenhuma tocando"}
+                              </span>
                             </div>
 
-                            {queuedTrackId && (
-                              <button onClick={executeTransition} className="bg-purple-600 hover:bg-purple-500 text-white px-3 py-1 rounded text-xs font-bold flex items-center gap-1 animate-pulse">
-                                <FastForward className="w-3 h-3 fill-current" /> Transicionar
+                            <div className="flex flex-wrap gap-3 items-center ml-auto">
+                              {/* SELETOR DE MODO DE TRANSIÇÃO PADRÃO */}
+                              <div className="flex items-center bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-xs">
+                                <span className="text-[10px] uppercase font-bold text-slate-400 px-2 hidden sm:inline">Transição:</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setAudioTransitionMode('instant')}
+                                  className={`px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition-all ${
+                                    audioTransitionMode === 'instant'
+                                      ? 'bg-amber-600 text-white shadow-sm'
+                                      : 'text-slate-400 hover:text-slate-200'
+                                  }`}
+                                  title="Mudar Instantaneamente (Corte seco sem fade ao trocar)"
+                                >
+                                  <Zap className="w-3 h-3 text-amber-300" /> Instantâneo
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setAudioTransitionMode('fade')}
+                                  className={`px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition-all ${
+                                    audioTransitionMode === 'fade'
+                                      ? 'bg-purple-600 text-white shadow-sm'
+                                      : 'text-slate-400 hover:text-slate-200'
+                                  }`}
+                                  title="Transição Fade In/Out na hora (Crossfade suave)"
+                                >
+                                  <RefreshCw className="w-3 h-3 text-purple-300" /> Fade Suave
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setAudioTransitionMode('end')}
+                                  className={`px-2 py-1 rounded text-[11px] font-semibold flex items-center gap-1 transition-all ${
+                                    audioTransitionMode === 'end'
+                                      ? 'bg-indigo-600 text-white shadow-sm'
+                                      : 'text-slate-400 hover:text-slate-200'
+                                  }`}
+                                  title="Mudar ao final dessa música (Tocar a seguir quando a atual terminar)"
+                                >
+                                  <Clock className="w-3 h-3 text-indigo-300" /> Ao Final
+                                </button>
+                              </div>
+
+                              <div className="flex items-center gap-2 bg-slate-950/60 px-2 py-1 rounded border border-slate-800">
+                                <span className="text-[10px] text-slate-400 font-bold uppercase">Vol:</span>
+                                <input type="range" min="0" max="1" step="0.05" 
+                                  value={activeScene.audio?.volume !== undefined ? activeScene.audio.volume : 1} 
+                                  onChange={handleVolumeChange} 
+                                  onMouseUp={handleVolumeCommit} 
+                                  onTouchEnd={handleVolumeCommit} 
+                                  className="w-16 md:w-20 accent-purple-500 h-1 bg-slate-800 rounded appearance-none cursor-pointer" />
+                              </div>
+
+                              <label className="flex items-center gap-1 text-xs text-slate-400 cursor-pointer hover:text-white">
+                                <input type="checkbox" checked={activeScene.audio?.loop} onChange={toggleLoop} className="accent-purple-500" />
+                                Loop
+                              </label>
+
+                              <button onClick={stopAudio} className="text-[10px] bg-slate-800 hover:bg-red-950 text-slate-300 py-1 px-2 rounded border border-slate-700">
+                                Parar Trilha
                               </button>
-                            )}
-                            <label className="flex items-center gap-1 text-xs text-slate-400 cursor-pointer hover:text-white">
-                              <input type="checkbox" checked={activeScene.audio?.loop} onChange={toggleLoop} className="accent-purple-500" />
-                              Loop
-                            </label>
-                            <button onClick={stopAudio} className="text-[10px] bg-slate-800 hover:bg-red-950 text-slate-300 py-1 px-2 rounded border border-slate-700">
-                              Parar Trilha
-                            </button>
+                            </div>
                           </div>
+
+                          {/* BANNER DE TRILHA ENFILEIRADA (MUDAR AO FINAL DA MÚSICA) */}
+                          {queuedTrackId && (
+                            <div className="bg-amber-950/40 border border-amber-500/40 p-2 rounded-lg flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <Clock className="w-4 h-4 text-amber-400 animate-pulse shrink-0" />
+                                <span className="text-xs text-amber-200 truncate">
+                                  A Seguir: <strong className="text-white font-semibold">{tracks.find(t => t.id === queuedTrackId)?.name || 'Faixa Selecionada'}</strong>
+                                  <span className="text-amber-400/80 text-[10px] ml-1.5 hidden sm:inline">(tocará automaticamente ao fim da música atual)</span>
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5 ml-auto">
+                                <button
+                                  type="button"
+                                  onClick={() => executeTransition('fade')}
+                                  className="bg-purple-600 hover:bg-purple-500 text-white px-2.5 py-1 rounded text-xs font-bold flex items-center gap-1 shadow-sm transition-all"
+                                  title="Transicionar imediatamente com Fade In/Out"
+                                >
+                                  <RefreshCw className="w-3 h-3" /> Fade Agora
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => executeTransition('instant')}
+                                  className="bg-amber-600 hover:bg-amber-500 text-white px-2.5 py-1 rounded text-xs font-bold flex items-center gap-1 shadow-sm transition-all"
+                                  title="Mudar imediatamente com Corte Seco (sem fade)"
+                                >
+                                  <Zap className="w-3 h-3 fill-current" /> Instantâneo
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setQueuedTrackId(null)}
+                                  className="bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white px-1.5 py-1 rounded text-xs transition-colors"
+                                  title="Cancelar e remover da fila"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
 
                         {/* SUB-PAINEL 2: CONTROLES DO SOM AMBIENTE */}
@@ -589,7 +753,14 @@ export default function App() {
                             return (
                               <div key={track.id} className={`relative group p-3 rounded-xl border flex flex-col gap-2 transition-all ${cardColorClass}`}>
                                 <div className="pr-6">
-                                  <span className="font-medium text-xs text-slate-200 truncate block">{track.name}</span>
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <span className="font-medium text-xs text-slate-200 truncate block">{track.name}</span>
+                                    {(track.isStream || (typeof track.fileData === 'string' && track.fileData.startsWith('http'))) && (
+                                      <span className="text-[9px] px-1 py-0.2 rounded bg-blue-950/90 text-blue-300 border border-blue-800 font-bold shrink-0 flex items-center gap-0.5">
+                                        <Radio className="w-2.5 h-2.5 text-blue-400" /> Web
+                                      </span>
+                                    )}
+                                  </div>
                                   {trackTags.length > 0 && (
                                     <div className="flex flex-wrap gap-1 mt-1">
                                       {trackTags.map((tag, idx) => (
@@ -601,18 +772,66 @@ export default function App() {
                                   )}
                                 </div>
                                 
-                                <div className="flex gap-1.5 mt-auto pt-1">
-                                  <button 
-                                    onClick={() => { if (!isPlayingTrack) setQueuedTrackId(track.id); }}
-                                    className={`flex-1 py-1 rounded text-[10px] font-bold transition-colors flex items-center justify-center gap-1
-                                      ${isPlayingTrack ? 'bg-purple-600 text-white' : 'bg-slate-800/80 hover:bg-purple-950 text-purple-400'}`}
-                                  >
-                                    <Play className="w-2.5 h-2.5 fill-current" /> Trilha
-                                  </button>
+                                <div className="flex gap-1.5 mt-auto pt-1 items-center">
+                                  {/* Botão de Trilha Principal com Modo Selecionado + Ações Rápidas */}
+                                  <div className="flex-1 flex items-center gap-1 min-w-0">
+                                    <button 
+                                      type="button"
+                                      onClick={() => playTrackWithTransition(track.id, audioTransitionMode)}
+                                      className={`flex-1 py-1 px-2 rounded text-[10px] font-bold transition-colors flex items-center justify-center gap-1 truncate
+                                        ${isPlayingTrack 
+                                          ? 'bg-purple-600 text-white shadow-sm' 
+                                          : isQueued 
+                                            ? 'bg-amber-600 text-white animate-pulse' 
+                                            : 'bg-slate-800/80 hover:bg-purple-950 text-purple-400'}`}
+                                      title={`Tocar trilha (${
+                                        audioTransitionMode === 'instant' ? 'Mudar Instantaneamente (Corte Seco)' :
+                                        audioTransitionMode === 'end' ? 'Mudar ao Final da Música Atual' : 'Transição Fade Suave na Hora'
+                                      })`}
+                                    >
+                                      {audioTransitionMode === 'instant' ? (
+                                        <Zap className="w-2.5 h-2.5 text-amber-300 fill-current shrink-0" />
+                                      ) : audioTransitionMode === 'end' ? (
+                                        <Clock className="w-2.5 h-2.5 text-indigo-300 shrink-0" />
+                                      ) : (
+                                        <Play className="w-2.5 h-2.5 fill-current shrink-0" />
+                                      )}
+                                      <span className="truncate">{isPlayingTrack ? 'Tocando' : isQueued ? 'Na Fila' : 'Trilha'}</span>
+                                    </button>
+
+                                    {/* Ações diretas de 1 clique para os 3 modos de transição */}
+                                    <div className="flex items-center gap-0.5 bg-slate-950/80 p-0.5 rounded border border-slate-800 shrink-0">
+                                      <button
+                                        type="button"
+                                        onClick={() => playTrackWithTransition(track.id, 'instant')}
+                                        title="Mudar Instantaneamente (Corte Seco agora)"
+                                        className="p-1 rounded text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition-colors"
+                                      >
+                                        <Zap className="w-2.5 h-2.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => playTrackWithTransition(track.id, 'fade')}
+                                        title="Transição Fade In/Out na hora (Crossfade)"
+                                        className="p-1 rounded text-slate-400 hover:text-purple-400 hover:bg-slate-800 transition-colors"
+                                      >
+                                        <RefreshCw className="w-2.5 h-2.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => playTrackWithTransition(track.id, 'end')}
+                                        title="Mudar ao final dessa música (Enfileirar)"
+                                        className="p-1 rounded text-slate-400 hover:text-indigo-400 hover:bg-slate-800 transition-colors"
+                                      >
+                                        <Clock className="w-2.5 h-2.5" />
+                                      </button>
+                                    </div>
+                                  </div>
                                   
                                   <button 
+                                    type="button"
                                     onClick={() => playAmbient(track.id)}
-                                    className={`flex-1 py-1 rounded text-[10px] font-bold transition-colors flex items-center justify-center gap-1
+                                    className={`px-2 py-1 rounded text-[10px] font-bold transition-colors flex items-center justify-center gap-1 shrink-0
                                       ${isPlayingAmbient ? 'bg-emerald-600 text-white' : 'bg-slate-800/80 hover:bg-emerald-950 text-emerald-400'}`}
                                   >
                                     <Wind className="w-2.5 h-2.5" /> Ambiente
@@ -1378,7 +1597,7 @@ export default function App() {
                     <div>
                       <h3 className="text-xs uppercase tracking-widest text-amber-500 font-bold">Gerenciamento de Dados</h3>
                       <p className="text-xs text-slate-400 mt-1">
-                        Sincronize ou faça backup de suas campanhas, mapas e NPCs.
+                        Exportação rápida e leve: inclui campanhas, mapas, fichas, refúgios, NPCs e links de áudio (arquivos locais pesados de som são omitidos para agilizar).
                       </p>
                     </div>
 

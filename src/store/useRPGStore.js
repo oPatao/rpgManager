@@ -7,6 +7,7 @@ export const useRPGStore = create((set, get) => ({
   isLoading: true,
   activeCampaignId: null,
   queuedTrackId: null,
+  audioTransitionMode: 'fade', // 'instant' | 'fade' | 'end'
   audioProgress: { time: 0, duration: 0 },
   modalState: { isOpen: false, type: null, data: null },
   sheetModalState: { isOpen: false, npcId: null },
@@ -43,6 +44,7 @@ export const useRPGStore = create((set, get) => ({
   setIsLoading: (isLoading) => set({ isLoading }),
   setActiveCampaignId: (id) => set({ activeCampaignId: id }),
   setQueuedTrackId: (id) => set({ queuedTrackId: id }),
+  setAudioTransitionMode: (audioTransitionMode) => set({ audioTransitionMode }),
   setModalState: (modalState) => set({ modalState }),
   setSheetModalState: (sheetModalState) => set({ sheetModalState }),
   setNpcGeneratorState: (npcGeneratorState) => set({ npcGeneratorState }),
