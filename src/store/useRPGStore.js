@@ -8,6 +8,7 @@ export const useRPGStore = create((set, get) => ({
   activeCampaignId: null,
   queuedTrackId: null,
   audioTransitionMode: 'fade', // 'instant' | 'fade' | 'end'
+  audioTransitionDuration: 5, // duração em segundos para o fade suave (ex: 3, 5, 8, 10s)
   audioProgress: { time: 0, duration: 0 },
   modalState: { isOpen: false, type: null, data: null },
   sheetModalState: { isOpen: false, npcId: null },
@@ -45,6 +46,11 @@ export const useRPGStore = create((set, get) => ({
   setActiveCampaignId: (id) => set({ activeCampaignId: id }),
   setQueuedTrackId: (id) => set({ queuedTrackId: id }),
   setAudioTransitionMode: (audioTransitionMode) => set({ audioTransitionMode }),
+  setAudioTransitionDuration: async (duration) => {
+    const dur = Math.max(1, Math.min(30, Number(duration) || 5));
+    set({ audioTransitionDuration: dur });
+    await localDB.setItem('audio-transition-duration', dur);
+  },
   setModalState: (modalState) => set({ modalState }),
   setSheetModalState: (sheetModalState) => set({ sheetModalState }),
   setNpcGeneratorState: (npcGeneratorState) => set({ npcGeneratorState }),
@@ -116,6 +122,7 @@ export const useRPGStore = create((set, get) => ({
     const savedPartyTrackerState = await localDB.getItem('party-tracker-state');
     const savedUiState = await localDB.getItem('ui-state');
     const savedScene = await localDB.getItem('rpg-active-scene');
+    const savedTransitionDuration = await localDB.getItem('audio-transition-duration');
 
     set({
       campaigns: dbCampaigns,
@@ -130,6 +137,7 @@ export const useRPGStore = create((set, get) => ({
       pipState: savedPipState || { isVisible: true, isMinimized: false, size: 'medium' },
       partyTrackerState: savedPartyTrackerState || { isCollapsed: false },
       uiState: savedUiState || { activeTab: 'npcs' },
+      audioTransitionDuration: savedTransitionDuration ? Number(savedTransitionDuration) : 5,
       activeScene: savedScene ? { ...savedScene, npcs: savedScene.npcs || (savedScene.npc ? [{ ...savedScene.npc, variantIndex: 0, hideName: savedScene.hideNpcName || false, isHidden: false, isFadingOut: false }] : []) } : get().activeScene,
       cutscenes: await localDB.getItem('cutscenes') || [],
       handouts: await localDB.getItem('handouts') || [],

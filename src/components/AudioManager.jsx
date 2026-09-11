@@ -14,8 +14,10 @@ export const AudioManager = ({ audioState, setAudioProgress, tracksList }) => {
   const player2 = useRef(null);
   const activePlayer = useRef(1);
   const tracksRef = useRef([]);
+  const currentTrackIdRef = useRef(null);
   const fadeOutInterval = useRef(null);
   const fadeInInterval = useRef(null);
+  const audioTransitionDuration = useRPGStore(state => state.audioTransitionDuration) || 5;
 
   useEffect(() => {
      tracksRef.current = tracksList;
@@ -71,17 +73,32 @@ export const AudioManager = ({ audioState, setAudioProgress, tracksList }) => {
   useEffect(() => {
     if (!player1.current || !player2.current) return;
     const current = activePlayer.current === 1 ? player1.current : player2.current;
-    if (current && !current.paused && audioState?.volume !== undefined) {
+    // Só ajusta diretamente se não estiver ocorrendo um fade ativo
+    if (current && !current.paused && audioState?.volume !== undefined && !fadeInInterval.current && !fadeOutInterval.current) {
       current.volume = audioState.volume;
     }
   }, [audioState?.volume]);
 
-  const fadeOut = (audioElement, stepTime = 80) => {
+  // Função de Fade Out suave proporcional à duração configurada (ex: 5s ou 10s)
+  const fadeOut = (audioElement, durationSec = audioTransitionDuration) => {
     if (!audioElement || audioElement.paused) return;
     if (fadeOutInterval.current) clearInterval(fadeOutInterval.current);
+
+    const initialVolume = audioElement.volume;
+    if (initialVolume <= 0.01) {
+      audioElement.volume = 0;
+      audioElement.pause();
+      return;
+    }
+
+    const durationMs = Math.max(1000, durationSec * 1000);
+    const stepTime = 50; // atualiza a cada 50ms para transição fluida
+    const steps = durationMs / stepTime;
+    const stepVolume = initialVolume / steps;
+
     fadeOutInterval.current = setInterval(() => {
-      let newVol = audioElement.volume - 0.1;
-      if (newVol > 0.05) {
+      let newVol = audioElement.volume - stepVolume;
+      if (newVol > 0.02) {
         audioElement.volume = newVol;
       } else {
         audioElement.volume = 0;
@@ -93,13 +110,20 @@ export const AudioManager = ({ audioState, setAudioProgress, tracksList }) => {
     }, stepTime);
   };
 
-  const fadeIn = (audioElement, targetVolume = 1, stepTime = 80) => {
+  // Função de Fade In suave proporcional à duração configurada (ex: 5s ou 10s)
+  const fadeIn = (audioElement, targetVolume = 1, durationSec = audioTransitionDuration) => {
     if (!audioElement) return;
     if (fadeInInterval.current) clearInterval(fadeInInterval.current);
+
     audioElement.volume = 0;
+    const durationMs = Math.max(1000, durationSec * 1000);
+    const stepTime = 50;
+    const steps = durationMs / stepTime;
+    const stepVolume = targetVolume / steps;
+
     fadeInInterval.current = setInterval(() => {
-      let newVol = audioElement.volume + 0.1;
-      if (newVol < targetVolume - 0.05) {
+      let newVol = audioElement.volume + stepVolume;
+      if (newVol < targetVolume - 0.02) {
         audioElement.volume = newVol;
       } else {
         audioElement.volume = targetVolume;
@@ -116,15 +140,24 @@ export const AudioManager = ({ audioState, setAudioProgress, tracksList }) => {
 
     // Caso de parar trilha (trackId nulo)
     if (!audioState?.trackId) {
+      currentTrackIdRef.current = null;
       if (audioState?.transition === 'instant') {
         clearFades();
         if (player1.current) { player1.current.pause(); player1.current.currentTime = 0; }
         if (player2.current) { player2.current.pause(); player2.current.currentTime = 0; }
       } else {
-        fadeOut(player1.current);
-        fadeOut(player2.current);
+        const dur = audioState?.fadeDuration || audioTransitionDuration;
+        fadeOut(player1.current, dur);
+        fadeOut(player2.current, dur);
       }
       setAudioProgress({ time: 0, duration: 0 });
+      return;
+    }
+
+    // Se já é a mesma música tocando no player ativo e não houve requisição explícita de troca com nova timestamp
+    const isSameTrack = currentTrackIdRef.current === audioState.trackId;
+    if (isSameTrack && current && !current.paused) {
+      // A música já está tocando no ponto certo, preserva o currentTime atual
       return;
     }
 
@@ -134,6 +167,7 @@ export const AudioManager = ({ audioState, setAudioProgress, tracksList }) => {
       next.src = srcUrl;
       next.loop = !!audioState.loop;
       const targetVolume = audioState.volume !== undefined ? audioState.volume : 1;
+      const fadeDuration = audioState?.fadeDuration || audioTransitionDuration;
 
       // 1. MUDAR INSTANTANEAMENTE (Corte Seco)
       if (audioState?.transition === 'instant') {
@@ -146,18 +180,20 @@ export const AudioManager = ({ audioState, setAudioProgress, tracksList }) => {
         const playPromise = next.play();
         if (playPromise !== undefined) {
           playPromise.then(() => {
+            currentTrackIdRef.current = audioState.trackId;
             activePlayer.current = activePlayer.current === 1 ? 2 : 1;
           }).catch(e => console.log("Autoplay bloqueado:", e));
         }
       } else {
-        // 2. TRANSIÇÃO SUAVE NA HORA (Fade In / Fade Out - Crossfade)
+        // 2. TRANSIÇÃO SUAVE NA HORA (Fade In / Fade Out - Crossfade com duração configurável 5s/10s)
         clearFades();
         next.volume = 0;
         const playPromise = next.play();
         if (playPromise !== undefined) {
           playPromise.then(() => {
-            fadeIn(next, targetVolume);
-            fadeOut(current);
+            currentTrackIdRef.current = audioState.trackId;
+            fadeIn(next, targetVolume, fadeDuration);
+            fadeOut(current, fadeDuration);
             activePlayer.current = activePlayer.current === 1 ? 2 : 1;
           }).catch(e => console.log("Autoplay bloqueado:", e));
         }

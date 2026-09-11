@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Monitor, Users, Map, User, EyeOff, Eye, Music, Play, Square, Repeat, FastForward, Clock, Plus, Trash2, Folder, X, Save, Upload, Wind, FileText, Store, Pencil, FolderOpen, ChevronLeft, Shield, Home, Battery, RefreshCw, Tag, Dice5, Radio, Zap } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Monitor, Users, Map, User, EyeOff, Eye, Music, Play, Square, Repeat, FastForward, Clock, Plus, Trash2, Folder, X, Save, Upload, Wind, FileText, Store, Pencil, FolderOpen, ChevronLeft, Shield, Home, Battery, RefreshCw, Tag, Dice5, Radio, Zap, Search, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { PRESET_AUDIO_TAGS, getAudioTagStyle, getTrackMoodBorder } from './utils/audioTags';
 
 // IMPORTAÇÃO CORRIGIDA: getAssetUrl adicionado!
 import { localDB, getAllDataForBackup, importBackup, generateId, fileToDataUrl, getAssetUrl } from './services/db';
@@ -54,6 +55,7 @@ export default function App() {
     campaigns, locations, npcs, tracks, combatants, cutscenes, handouts, shops,
     activeScene, queuedTrackId, setQueuedTrackId,
     audioTransitionMode, setAudioTransitionMode,
+    audioTransitionDuration, setAudioTransitionDuration,
     combatState, loadData, publishScene, deleteAsset, setModalState, setSheetModalState, updateCollection,
     conflicts, activeConflict, saveConflict, deleteConflict, startConflict, endConflict, updateActiveConflict,
     partyTrackerState, toggleNPCParty, uiState,
@@ -177,7 +179,7 @@ export default function App() {
       publishAudioOnly({ 
         ...activeScene.audio, 
         trackId: queuedTrackId, 
-        seekEvent: { time: 0, id: Date.now() }, 
+        seekEvent: null, 
         transition: transitionType, 
         loop: true,
         playTimestamp: Date.now() 
@@ -188,13 +190,17 @@ export default function App() {
 
   // Disparo de faixas principais com suporte aos 3 modos: 'instant', 'fade', 'end'
   const playTrackWithTransition = (trackId, mode = audioTransitionMode) => {
+    // Se a música já for a mesma que está tocando no momento:
+    // Não reinicia a música nem força seek para 0; apenas assegura que o estado permaneça contínuo
+    const isCurrentTrack = activeScene.audio?.trackId === trackId;
+
     if (mode === 'end') {
       if (!activeScene.audio?.trackId) {
         // Se nenhuma música tocando no momento, inicia diretamente
         publishAudioOnly({
           ...activeScene.audio,
           trackId: trackId,
-          seekEvent: { time: 0, id: Date.now() },
+          seekEvent: null,
           transition: 'fade',
           loop: true,
           playTimestamp: Date.now()
@@ -214,21 +220,21 @@ export default function App() {
       publishAudioOnly({
         ...activeScene.audio,
         trackId: trackId,
-        seekEvent: { time: 0, id: Date.now() },
+        seekEvent: null,
         transition: 'instant',
         loop: true,
-        playTimestamp: Date.now()
+        playTimestamp: isCurrentTrack ? activeScene.audio?.playTimestamp : Date.now()
       }, undefined);
     } else {
-      // 2. Fazer Transição Fade In/Fade Out na hora (Crossfade)
+      // 2. Fazer Transição Fade In/Fade Out na hora (Crossfade suave)
       setQueuedTrackId(null);
       publishAudioOnly({
         ...activeScene.audio,
         trackId: trackId,
-        seekEvent: { time: 0, id: Date.now() },
+        seekEvent: null,
         transition: 'fade',
         loop: true,
-        playTimestamp: Date.now()
+        playTimestamp: isCurrentTrack ? activeScene.audio?.playTimestamp : Date.now()
       }, undefined);
     }
   };
@@ -241,7 +247,7 @@ export default function App() {
         publishAudioOnly({
           ...useRPGStore.getState().activeScene?.audio,
           trackId: nextId,
-          seekEvent: { time: 0, id: Date.now() },
+          seekEvent: null,
           transition: 'fade',
           loop: true,
           playTimestamp: Date.now()
@@ -322,6 +328,61 @@ export default function App() {
   const activeTracks = tracks.filter(t => t.campaignId === activeCampaignId);
   const activeCutscenes = cutscenes.filter(c => c.campaignId === activeCampaignId);
   const activeHandouts = handouts.filter(h => h.campaignId === activeCampaignId);
+
+  // Sistema Avançado de Tags para Áudios (Separador Temático / Moods sem pastas rígidas)
+  const [selectedAudioTag, setSelectedAudioTag] = useState('all'); // 'all' | tag name | 'untagged'
+  const [audioGroupByTag, setAudioGroupByTag] = useState(false); // Visual agrupado por seções de tags
+  const [audioSearchQuery, setAudioSearchQuery] = useState('');
+
+  // Lista de todas as tags únicas presentes nas faixas da campanha
+  const availableAudioTags = useMemo(() => {
+    const tagsSet = new Set();
+    activeTracks.forEach(t => {
+      (t.tags || []).forEach(tag => {
+        if (tag && tag.trim()) tagsSet.add(tag.trim());
+      });
+    });
+    return Array.from(tagsSet).sort((a, b) => a.localeCompare(b));
+  }, [activeTracks]);
+
+  // Faixas filtradas de acordo com a tag selecionada e busca
+  const filteredTracks = useMemo(() => {
+    return activeTracks.filter(t => {
+      const matchSearch = !audioSearchQuery.trim() || 
+        t.name.toLowerCase().includes(audioSearchQuery.toLowerCase()) ||
+        (t.tags || []).some(tag => tag.toLowerCase().includes(audioSearchQuery.toLowerCase()));
+
+      if (!matchSearch) return false;
+
+      if (selectedAudioTag === 'all') return true;
+      if (selectedAudioTag === 'untagged') return !t.tags || t.tags.length === 0;
+      return (t.tags || []).some(tag => tag.toLowerCase() === selectedAudioTag.toLowerCase());
+    });
+  }, [activeTracks, selectedAudioTag, audioSearchQuery]);
+
+  // Faixas agrupadas por tag para visualização organizada em seções temáticas
+  const groupedTracks = useMemo(() => {
+    if (!audioGroupByTag) return null;
+    const groups = {};
+    const untagged = [];
+
+    filteredTracks.forEach(t => {
+      const tTags = t.tags || [];
+      if (tTags.length === 0) {
+        untagged.push(t);
+      } else {
+        tTags.forEach(tag => {
+          const key = tag.trim();
+          if (!groups[key]) groups[key] = [];
+          if (!groups[key].some(item => item.id === t.id)) {
+            groups[key].push(t);
+          }
+        });
+      }
+    });
+
+    return { groups, untagged };
+  }, [filteredTracks, audioGroupByTag]);
 
   const activeRefuges = (useRPGStore.getState().refuges || []).filter(r => r.campaignId === activeCampaignId);
   const [activeFolderRefuges, setActiveFolderRefuges] = useState('');
@@ -640,6 +701,35 @@ export default function App() {
                                 </button>
                               </div>
 
+                              {/* SELETOR DE TEMPO DO FADE (5s / 10s) */}
+                              <div className="flex items-center bg-slate-950/80 p-0.5 rounded-lg border border-slate-800 text-xs" title="Tempo da transição suave (Crossfade)">
+                                <span className="text-[10px] uppercase font-bold text-purple-400/90 px-1.5 hidden sm:inline">Duração:</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setAudioTransitionDuration(5)}
+                                  className={`px-2 py-1 rounded text-[11px] font-bold transition-all ${
+                                    (audioTransitionDuration || 5) === 5
+                                      ? 'bg-purple-600 text-white shadow-sm'
+                                      : 'text-slate-400 hover:text-slate-200'
+                                  }`}
+                                  title="Transição suave de 5 segundos"
+                                >
+                                  5s
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setAudioTransitionDuration(10)}
+                                  className={`px-2 py-1 rounded text-[11px] font-bold transition-all ${
+                                    (audioTransitionDuration || 5) === 10
+                                      ? 'bg-purple-600 text-white shadow-sm'
+                                      : 'text-slate-400 hover:text-slate-200'
+                                  }`}
+                                  title="Transição suave de 10 segundos"
+                                >
+                                  10s
+                                </button>
+                              </div>
+
                               <div className="flex items-center gap-2 bg-slate-950/60 px-2 py-1 rounded border border-slate-800">
                                 <span className="text-[10px] text-slate-400 font-bold uppercase">Vol:</span>
                                 <input type="range" min="0" max="1" step="0.05" 
@@ -731,125 +821,509 @@ export default function App() {
                           </div>
                         </div>
 
+                        {/* --- BARRA AVANÇADA DE TAGS, CLIMAS & SEPARAÇÃO DE ÁUDIOS --- */}
+                        <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-800 flex flex-col gap-2.5">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                                <Tag className="w-3.5 h-3.5 text-purple-400" />
+                                Filtrar por Clima / Tag
+                              </span>
+                              <span className="text-[11px] text-slate-400 bg-slate-950 px-2 py-0.5 rounded-full border border-slate-800">
+                                {filteredTracks.length} de {activeTracks.length} {activeTracks.length === 1 ? 'faixa' : 'faixas'}
+                              </span>
+                            </div>
+
+                            {/* Alternar visualização Agrupada vs Grade Única */}
+                            <div className="flex items-center gap-2 ml-auto">
+                              <button
+                                type="button"
+                                onClick={() => setAudioGroupByTag(!audioGroupByTag)}
+                                className={`text-xs px-2.5 py-1 rounded-lg border font-semibold flex items-center gap-1.5 transition-all ${
+                                  audioGroupByTag
+                                    ? 'bg-purple-900/60 border-purple-600 text-purple-200 shadow-sm'
+                                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                                }`}
+                                title="Organizar músicas divididas por seções de tags/climas"
+                              >
+                                <SlidersHorizontal className="w-3 h-3" />
+                                {audioGroupByTag ? 'Seções Separadas' : 'Grade Contínua'}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Campo de Busca Rápida + Pílulas de Tags */}
+                          <div className="flex flex-wrap sm:flex-nowrap gap-2 items-center">
+                            <div className="relative flex-1 min-w-[180px]">
+                              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                              <input
+                                type="text"
+                                value={audioSearchQuery}
+                                onChange={(e) => setAudioSearchQuery(e.target.value)}
+                                placeholder="Buscar por nome ou tag (ex: combate, taverna)..."
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-7 py-1.5 text-xs text-white placeholder:text-slate-400 focus:border-purple-500 focus:outline-none"
+                              />
+                              {audioSearchQuery && (
+                                <button
+                                  type="button"
+                                  onClick={() => setAudioSearchQuery('')}
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+
+                            {selectedAudioTag !== 'all' && (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedAudioTag('all')}
+                                className="text-[11px] text-purple-400 hover:text-purple-300 underline font-medium shrink-0 px-1"
+                              >
+                                Limpar filtro
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Carrossel / Grade de Tags Interativas */}
+                          <div className="flex flex-wrap gap-1.5 items-center pt-1 border-t border-slate-800/60">
+                            {/* Pílula: Todas */}
+                            <button
+                              type="button"
+                              onClick={() => setSelectedAudioTag('all')}
+                              className={`text-xs px-2.5 py-1 rounded-full border transition-all flex items-center gap-1 font-medium ${
+                                selectedAudioTag === 'all'
+                                  ? 'bg-purple-600 border-purple-500 text-white shadow-sm font-bold'
+                                  : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700 hover:text-white'
+                              }`}
+                            >
+                              Todas ({activeTracks.length})
+                            </button>
+
+                            {/* Tags Atuais Existentes */}
+                            {availableAudioTags.map(tag => {
+                              const isSelected = selectedAudioTag.toLowerCase() === tag.toLowerCase();
+                              const style = getAudioTagStyle(tag);
+                              const count = activeTracks.filter(t => (t.tags || []).some(x => x.toLowerCase() === tag.toLowerCase())).length;
+
+                              return (
+                                <button
+                                  key={tag}
+                                  type="button"
+                                  onClick={() => setSelectedAudioTag(isSelected ? 'all' : tag)}
+                                  className={`text-xs px-2.5 py-1 rounded-full border transition-all flex items-center gap-1.5 font-medium ${
+                                    isSelected
+                                      ? `${style.bg} ${style.border} ${style.text} ring-2 ring-purple-500/60 font-bold shadow-sm`
+                                      : 'bg-slate-950/80 text-slate-300 border-slate-800/90 hover:border-slate-700 hover:text-white'
+                                  }`}
+                                >
+                                  <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
+                                  <span>{tag}</span>
+                                  <span className="text-[10px] opacity-70 bg-slate-900 px-1 rounded-full">{count}</span>
+                                </button>
+                              );
+                            })}
+
+                            {/* Pílula de Faixas sem Tag */}
+                            {activeTracks.some(t => !t.tags || t.tags.length === 0) && (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedAudioTag(selectedAudioTag === 'untagged' ? 'all' : 'untagged')}
+                                className={`text-xs px-2.5 py-1 rounded-full border transition-all flex items-center gap-1 font-medium ${
+                                  selectedAudioTag === 'untagged'
+                                    ? 'bg-slate-700 border-slate-500 text-white font-bold'
+                                    : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-300'
+                                }`}
+                              >
+                                <span>Sem Tag</span>
+                                <span className="text-[10px] opacity-70 bg-slate-900 px-1 rounded-full">
+                                  {activeTracks.filter(t => !t.tags || t.tags.length === 0).length}
+                                </span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
                         {activeTracks.length === 0 && <p className="text-slate-500 text-sm italic py-2">Sem músicas ou ambientes. Faça upload de um MP3.</p>}
+                        {activeTracks.length > 0 && filteredTracks.length === 0 && (
+                          <div className="bg-slate-900/50 p-6 rounded-xl border border-slate-800 text-center flex flex-col items-center justify-center gap-2">
+                            <Tag className="w-8 h-8 text-slate-600" />
+                            <p className="text-slate-300 text-sm font-semibold">Nenhum áudio encontrado para este filtro.</p>
+                            <p className="text-slate-500 text-xs">Experimente limpar a busca ou selecionar outra tag.</p>
+                            <button
+                              type="button"
+                              onClick={() => { setSelectedAudioTag('all'); setAudioSearchQuery(''); }}
+                              className="mt-1 bg-purple-600 hover:bg-purple-500 text-white text-xs px-3 py-1.5 rounded-lg font-bold"
+                            >
+                              Ver Todas as Faixas
+                            </button>
+                          </div>
+                        )}
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                          {activeTracks.map(track => {
-                            const isPlayingTrack = activeScene.audio?.trackId === track.id;
-                            const isPlayingAmbient = activeScene.ambient?.trackId === track.id;
-                            const isQueued = queuedTrackId === track.id;
-                            
-                            const trackTags = track.tags || [];
-                            const hasTag = (name) => trackTags.some(t => t.toLowerCase() === name.toLowerCase());
-
-                            let cardColorClass = 'border-slate-800 bg-slate-900/50 hover:border-slate-700';
-                            if (isPlayingTrack) cardColorClass = 'border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.15)] bg-slate-900';
-                            else if (isPlayingAmbient) cardColorClass = 'border-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.15)] bg-slate-900';
-                            else if (isQueued) cardColorClass = 'border-amber-500 border-dashed bg-slate-900';
-                            else if (hasTag('combate') || hasTag('batalha') || hasTag('boss')) cardColorClass = 'border-red-900/40 bg-red-950/10 hover:border-red-700/60';
-                            else if (hasTag('tranquila') || hasTag('calma') || hasTag('cidade')) cardColorClass = 'border-cyan-900/40 bg-cyan-950/10 hover:border-cyan-700/60';
-                            else if (hasTag('suspense') || hasTag('terror') || hasTag('caverna')) cardColorClass = 'border-orange-900/40 bg-orange-950/10 hover:border-orange-700/60';
-
-                            return (
-                              <div key={track.id} className={`relative group p-3 rounded-xl border flex flex-col gap-2 transition-all ${cardColorClass}`}>
-                                <div className="pr-6">
-                                  <div className="flex items-center gap-1.5 min-w-0">
-                                    <span className="font-medium text-xs text-slate-200 truncate block">{track.name}</span>
-                                    {(track.isStream || (typeof track.fileData === 'string' && track.fileData.startsWith('http'))) && (
-                                      <span className="text-[9px] px-1 py-0.2 rounded bg-blue-950/90 text-blue-300 border border-blue-800 font-bold shrink-0 flex items-center gap-0.5">
-                                        <Radio className="w-2.5 h-2.5 text-blue-400" /> Web
+                        {/* MODO AGRUPADO POR SEÇÕES DE TAGS */}
+                        {audioGroupByTag && groupedTracks && (
+                          <div className="flex flex-col gap-6">
+                            {Object.entries(groupedTracks.groups).map(([groupTag, groupTrackList]) => {
+                              const tagStyle = getAudioTagStyle(groupTag);
+                              return (
+                                <div key={groupTag} className="flex flex-col gap-2.5 bg-slate-900/30 p-3.5 rounded-2xl border border-slate-800/80">
+                                  {/* Cabeçalho da Seção de Tag */}
+                                  <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                                    <div className="flex items-center gap-2">
+                                      <span className={`w-2.5 h-2.5 rounded-full ${tagStyle.dot}`} />
+                                      <h3 className={`text-sm font-bold capitalize ${tagStyle.text}`}>{groupTag}</h3>
+                                      <span className="text-[10px] text-slate-400 bg-slate-950 px-2 py-0.5 rounded-full border border-slate-800">
+                                        {groupTrackList.length} {groupTrackList.length === 1 ? 'faixa' : 'faixas'}
                                       </span>
-                                    )}
-                                  </div>
-                                  {trackTags.length > 0 && (
-                                    <div className="flex flex-wrap gap-1 mt-1">
-                                      {trackTags.map((tag, idx) => (
-                                        <span key={idx} className="text-[9px] px-1.5 py-0.5 rounded bg-slate-950/60 text-slate-400 border border-slate-800 uppercase tracking-tight font-semibold">
-                                          {tag}
-                                        </span>
-                                      ))}
                                     </div>
-                                  )}
-                                </div>
-                                
-                                <div className="flex gap-1.5 mt-auto pt-1 items-center">
-                                  {/* Botão de Trilha Principal com Modo Selecionado + Ações Rápidas */}
-                                  <div className="flex-1 flex items-center gap-1 min-w-0">
-                                    <button 
+                                    <button
                                       type="button"
-                                      onClick={() => playTrackWithTransition(track.id, audioTransitionMode)}
-                                      className={`flex-1 py-1 px-2 rounded text-[10px] font-bold transition-colors flex items-center justify-center gap-1 truncate
-                                        ${isPlayingTrack 
-                                          ? 'bg-purple-600 text-white shadow-sm' 
-                                          : isQueued 
-                                            ? 'bg-amber-600 text-white animate-pulse' 
-                                            : 'bg-slate-800/80 hover:bg-purple-950 text-purple-400'}`}
-                                      title={`Tocar trilha (${
-                                        audioTransitionMode === 'instant' ? 'Mudar Instantaneamente (Corte Seco)' :
-                                        audioTransitionMode === 'end' ? 'Mudar ao Final da Música Atual' : 'Transição Fade Suave na Hora'
-                                      })`}
+                                      onClick={() => setSelectedAudioTag(groupTag)}
+                                      className="text-[11px] text-purple-400 hover:text-purple-300 hover:underline"
                                     >
-                                      {audioTransitionMode === 'instant' ? (
-                                        <Zap className="w-2.5 h-2.5 text-amber-300 fill-current shrink-0" />
-                                      ) : audioTransitionMode === 'end' ? (
-                                        <Clock className="w-2.5 h-2.5 text-indigo-300 shrink-0" />
-                                      ) : (
-                                        <Play className="w-2.5 h-2.5 fill-current shrink-0" />
-                                      )}
-                                      <span className="truncate">{isPlayingTrack ? 'Tocando' : isQueued ? 'Na Fila' : 'Trilha'}</span>
+                                      Filtrar apenas {groupTag}
                                     </button>
-
-                                    {/* Ações diretas de 1 clique para os 3 modos de transição */}
-                                    <div className="flex items-center gap-0.5 bg-slate-950/80 p-0.5 rounded border border-slate-800 shrink-0">
-                                      <button
-                                        type="button"
-                                        onClick={() => playTrackWithTransition(track.id, 'instant')}
-                                        title="Mudar Instantaneamente (Corte Seco agora)"
-                                        className="p-1 rounded text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition-colors"
-                                      >
-                                        <Zap className="w-2.5 h-2.5" />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => playTrackWithTransition(track.id, 'fade')}
-                                        title="Transição Fade In/Out na hora (Crossfade)"
-                                        className="p-1 rounded text-slate-400 hover:text-purple-400 hover:bg-slate-800 transition-colors"
-                                      >
-                                        <RefreshCw className="w-2.5 h-2.5" />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => playTrackWithTransition(track.id, 'end')}
-                                        title="Mudar ao final dessa música (Enfileirar)"
-                                        className="p-1 rounded text-slate-400 hover:text-indigo-400 hover:bg-slate-800 transition-colors"
-                                      >
-                                        <Clock className="w-2.5 h-2.5" />
-                                      </button>
-                                    </div>
                                   </div>
-                                  
-                                  <button 
-                                    type="button"
-                                    onClick={() => playAmbient(track.id)}
-                                    className={`px-2 py-1 rounded text-[10px] font-bold transition-colors flex items-center justify-center gap-1 shrink-0
-                                      ${isPlayingAmbient ? 'bg-emerald-600 text-white' : 'bg-slate-800/80 hover:bg-emerald-950 text-emerald-400'}`}
-                                  >
-                                    <Wind className="w-2.5 h-2.5" /> Ambiente
-                                  </button>
+
+                                  {/* Grid de Faixas desta Categoria */}
+                                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                    {groupTrackList.map(track => {
+                                      const isPlayingTrack = activeScene.audio?.trackId === track.id;
+                                      const isPlayingAmbient = activeScene.ambient?.trackId === track.id;
+                                      const isQueued = queuedTrackId === track.id;
+                                      const trackTags = track.tags || [];
+
+                                      let cardColorClass = getTrackMoodBorder(trackTags);
+                                      if (isPlayingTrack) cardColorClass = 'border-purple-500 shadow-[0_0_12px_rgba(168,85,247,0.2)] bg-slate-900';
+                                      else if (isPlayingAmbient) cardColorClass = 'border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.2)] bg-slate-900';
+                                      else if (isQueued) cardColorClass = 'border-amber-500 border-dashed bg-slate-900';
+
+                                      return (
+                                        <div key={`grouped-${groupTag}-${track.id}`} className={`relative group p-3 rounded-xl border flex flex-col gap-2 transition-all ${cardColorClass}`}>
+                                          <div className="pr-6">
+                                            <div className="flex items-center gap-1.5 min-w-0">
+                                              <span className="font-medium text-xs text-slate-200 truncate block">{track.name}</span>
+                                              {(track.isStream || (typeof track.fileData === 'string' && track.fileData.startsWith('http'))) && (
+                                                <span className="text-[9px] px-1 py-0.2 rounded bg-blue-950/90 text-blue-300 border border-blue-800 font-bold shrink-0 flex items-center gap-0.5">
+                                                  <Radio className="w-2.5 h-2.5 text-blue-400" /> Web
+                                                </span>
+                                              )}
+                                            </div>
+                                            {trackTags.length > 0 && (
+                                              <div className="flex flex-wrap gap-1 mt-1">
+                                                {trackTags.map((tag, idx) => {
+                                                  const chipStyle = getAudioTagStyle(tag);
+                                                  return (
+                                                    <button
+                                                      key={idx}
+                                                      type="button"
+                                                      onClick={(e) => { e.stopPropagation(); setSelectedAudioTag(tag); }}
+                                                      className={`text-[9px] px-1.5 py-0.5 rounded-full border uppercase tracking-tight font-semibold flex items-center gap-1 transition-transform hover:scale-105 ${chipStyle.bg} ${chipStyle.border} ${chipStyle.text}`}
+                                                      title={`Filtrar por ${tag}`}
+                                                    >
+                                                      <span className={`w-1 h-1 rounded-full ${chipStyle.dot}`} />
+                                                      {tag}
+                                                    </button>
+                                                  );
+                                                })}
+                                              </div>
+                                            )}
+                                          </div>
+
+                                          <div className="flex gap-1.5 mt-auto pt-1 items-center">
+                                            <div className="flex-1 flex items-center gap-1 min-w-0">
+                                              <button 
+                                                type="button"
+                                                onClick={() => playTrackWithTransition(track.id, audioTransitionMode)}
+                                                className={`flex-1 py-1 px-2 rounded text-[10px] font-bold transition-colors flex items-center justify-center gap-1 truncate
+                                                  ${isPlayingTrack 
+                                                    ? 'bg-purple-600 text-white shadow-sm' 
+                                                    : isQueued 
+                                                      ? 'bg-amber-600 text-white animate-pulse' 
+                                                      : 'bg-slate-800/80 hover:bg-purple-950 text-purple-400'}`}
+                                                title={`Tocar trilha (${
+                                                  audioTransitionMode === 'instant' ? 'Mudar Instantaneamente (Corte Seco)' :
+                                                  audioTransitionMode === 'end' ? 'Mudar ao Final da Música Atual' : 'Transição Fade Suave na Hora'
+                                                })`}
+                                              >
+                                                {audioTransitionMode === 'instant' ? (
+                                                  <Zap className="w-2.5 h-2.5 text-amber-300 fill-current shrink-0" />
+                                                ) : audioTransitionMode === 'end' ? (
+                                                  <Clock className="w-2.5 h-2.5 text-indigo-300 shrink-0" />
+                                                ) : (
+                                                  <Play className="w-2.5 h-2.5 fill-current shrink-0" />
+                                                )}
+                                                <span className="truncate">{isPlayingTrack ? 'Tocando' : isQueued ? 'Na Fila' : 'Trilha'}</span>
+                                              </button>
+
+                                              <div className="flex items-center gap-0.5 bg-slate-950/80 p-0.5 rounded border border-slate-800 shrink-0">
+                                                <button
+                                                  type="button"
+                                                  onClick={() => playTrackWithTransition(track.id, 'instant')}
+                                                  title="Mudar Instantaneamente (Corte Seco agora)"
+                                                  className="p-1 rounded text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition-colors"
+                                                >
+                                                  <Zap className="w-2.5 h-2.5" />
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => playTrackWithTransition(track.id, 'fade')}
+                                                  title="Transição Fade In/Out na hora (Crossfade)"
+                                                  className="p-1 rounded text-slate-400 hover:text-purple-400 hover:bg-slate-800 transition-colors"
+                                                >
+                                                  <RefreshCw className="w-2.5 h-2.5" />
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => playTrackWithTransition(track.id, 'end')}
+                                                  title="Mudar ao final dessa música (Enfileirar)"
+                                                  className="p-1 rounded text-slate-400 hover:text-indigo-400 hover:bg-slate-800 transition-colors"
+                                                >
+                                                  <Clock className="w-2.5 h-2.5" />
+                                                </button>
+                                              </div>
+                                            </div>
+
+                                            <button 
+                                              type="button"
+                                              onClick={() => playAmbient(track.id)}
+                                              className={`px-2 py-1 rounded text-[10px] font-bold transition-colors flex items-center justify-center gap-1 shrink-0
+                                                ${isPlayingAmbient ? 'bg-emerald-600 text-white' : 'bg-slate-800/80 hover:bg-emerald-950 text-emerald-400'}`}
+                                            >
+                                              <Wind className="w-2.5 h-2.5" /> Ambiente
+                                            </button>
+                                          </div>
+
+                                          <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                            <button onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'track', data: track }); }} title="Editar Áudio e Tags" className="p-1.5 bg-blue-900/90 text-white rounded hover:bg-blue-600 transition-colors">
+                                              <Pencil className="w-3 h-3" />
+                                            </button>
+                                            <button onClick={(e) => { e.stopPropagation(); deleteAsset('tracks', track.id); }} title="Excluir Áudio" className="p-1.5 bg-red-950 text-red-400 rounded hover:bg-red-600 hover:text-white transition-colors">
+                                              <Trash2 className="w-3 h-3" />
+                                            </button>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              );
+                            })}
+
+                            {/* Seção de faixas sem nenhuma tag */}
+                            {groupedTracks.untagged.length > 0 && (
+                              <div className="flex flex-col gap-2.5 bg-slate-900/20 p-3.5 rounded-2xl border border-slate-800/60">
+                                <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                                  <div className="flex items-center gap-2">
+                                    <span className="w-2.5 h-2.5 rounded-full bg-slate-500" />
+                                    <h3 className="text-sm font-bold text-slate-400">Sem Categoria Definida</h3>
+                                    <span className="text-[10px] text-slate-400 bg-slate-950 px-2 py-0.5 rounded-full border border-slate-800">
+                                      {groupedTracks.untagged.length} faixas
+                                    </span>
+                                  </div>
                                 </div>
 
-                                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                                  <button onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'track', data: track }); }} title="Editar Áudio" className="p-1.5 bg-blue-900/90 text-white rounded hover:bg-blue-600 transition-colors">
-                                    <Pencil className="w-3 h-3" />
-                                  </button>
-                                  <button onClick={(e) => { e.stopPropagation(); deleteAsset('tracks', track.id); }} title="Excluir Áudio" className="p-1.5 bg-red-950 text-red-400 rounded hover:bg-red-600 hover:text-white transition-colors">
-                                    <Trash2 className="w-3 h-3" />
-                                  </button>
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                  {groupedTracks.untagged.map(track => {
+                                    const isPlayingTrack = activeScene.audio?.trackId === track.id;
+                                    const isPlayingAmbient = activeScene.ambient?.trackId === track.id;
+                                    const isQueued = queuedTrackId === track.id;
+
+                                    let cardColorClass = 'border-slate-800 bg-slate-900/50 hover:border-slate-700';
+                                    if (isPlayingTrack) cardColorClass = 'border-purple-500 shadow-[0_0_12px_rgba(168,85,247,0.2)] bg-slate-900';
+                                    else if (isPlayingAmbient) cardColorClass = 'border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.2)] bg-slate-900';
+                                    else if (isQueued) cardColorClass = 'border-amber-500 border-dashed bg-slate-900';
+
+                                    return (
+                                      <div key={`untagged-${track.id}`} className={`relative group p-3 rounded-xl border flex flex-col gap-2 transition-all ${cardColorClass}`}>
+                                        <div className="pr-6">
+                                          <span className="font-medium text-xs text-slate-200 truncate block">{track.name}</span>
+                                          <button
+                                            type="button"
+                                            onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'track', data: track }); }}
+                                            className="text-[10px] text-purple-400 hover:text-purple-300 flex items-center gap-1 mt-1 font-semibold"
+                                          >
+                                            <Tag className="w-2.5 h-2.5" /> Adicionar tags...
+                                          </button>
+                                        </div>
+
+                                        <div className="flex gap-1.5 mt-auto pt-1 items-center">
+                                          <div className="flex-1 flex items-center gap-1 min-w-0">
+                                            <button 
+                                              type="button"
+                                              onClick={() => playTrackWithTransition(track.id, audioTransitionMode)}
+                                              className={`flex-1 py-1 px-2 rounded text-[10px] font-bold transition-colors flex items-center justify-center gap-1 truncate
+                                                ${isPlayingTrack ? 'bg-purple-600 text-white shadow-sm' : isQueued ? 'bg-amber-600 text-white animate-pulse' : 'bg-slate-800/80 hover:bg-purple-950 text-purple-400'}`}
+                                            >
+                                              <Play className="w-2.5 h-2.5 fill-current shrink-0" />
+                                              <span className="truncate">{isPlayingTrack ? 'Tocando' : isQueued ? 'Na Fila' : 'Trilha'}</span>
+                                            </button>
+                                          </div>
+                                          <button 
+                                            type="button"
+                                            onClick={() => playAmbient(track.id)}
+                                            className={`px-2 py-1 rounded text-[10px] font-bold transition-colors flex items-center justify-center gap-1 shrink-0
+                                              ${isPlayingAmbient ? 'bg-emerald-600 text-white' : 'bg-slate-800/80 hover:bg-emerald-950 text-emerald-400'}`}
+                                          >
+                                            <Wind className="w-2.5 h-2.5" /> Ambiente
+                                          </button>
+                                        </div>
+
+                                        <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                          <button onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'track', data: track }); }} title="Editar Áudio" className="p-1.5 bg-blue-900/90 text-white rounded hover:bg-blue-600 transition-colors">
+                                            <Pencil className="w-3 h-3" />
+                                          </button>
+                                          <button onClick={(e) => { e.stopPropagation(); deleteAsset('tracks', track.id); }} title="Excluir Áudio" className="p-1.5 bg-red-950 text-red-400 rounded hover:bg-red-600 hover:text-white transition-colors">
+                                            <Trash2 className="w-3 h-3" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               </div>
-                            )
-                          })}
-                        </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* MODO GRADE PADRÃO COM FILTROS ATIVOS */}
+                        {!audioGroupByTag && filteredTracks.length > 0 && (
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                            {filteredTracks.map(track => {
+                              const isPlayingTrack = activeScene.audio?.trackId === track.id;
+                              const isPlayingAmbient = activeScene.ambient?.trackId === track.id;
+                              const isQueued = queuedTrackId === track.id;
+                              
+                              const trackTags = track.tags || [];
+
+                              let cardColorClass = getTrackMoodBorder(trackTags);
+                              if (isPlayingTrack) cardColorClass = 'border-purple-500 shadow-[0_0_12px_rgba(168,85,247,0.2)] bg-slate-900';
+                              else if (isPlayingAmbient) cardColorClass = 'border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.2)] bg-slate-900';
+                              else if (isQueued) cardColorClass = 'border-amber-500 border-dashed bg-slate-900';
+
+                              return (
+                                <div key={track.id} className={`relative group p-3 rounded-xl border flex flex-col gap-2 transition-all ${cardColorClass}`}>
+                                  <div className="pr-6">
+                                    <div className="flex items-center gap-1.5 min-w-0">
+                                      <span className="font-medium text-xs text-slate-200 truncate block">{track.name}</span>
+                                      {(track.isStream || (typeof track.fileData === 'string' && track.fileData.startsWith('http'))) && (
+                                        <span className="text-[9px] px-1 py-0.2 rounded bg-blue-950/90 text-blue-300 border border-blue-800 font-bold shrink-0 flex items-center gap-0.5">
+                                          <Radio className="w-2.5 h-2.5 text-blue-400" /> Web
+                                        </span>
+                                      )}
+                                    </div>
+                                    {trackTags.length > 0 ? (
+                                      <div className="flex flex-wrap gap-1 mt-1">
+                                        {trackTags.map((tag, idx) => {
+                                          const chipStyle = getAudioTagStyle(tag);
+                                          const isTagActive = selectedAudioTag.toLowerCase() === tag.toLowerCase();
+                                          return (
+                                            <button
+                                              key={idx}
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setSelectedAudioTag(isTagActive ? 'all' : tag);
+                                              }}
+                                              className={`text-[9px] px-1.5 py-0.5 rounded-full border uppercase tracking-tight font-semibold flex items-center gap-1 transition-transform hover:scale-105 ${chipStyle.bg} ${chipStyle.border} ${chipStyle.text} ${isTagActive ? 'ring-1 ring-purple-400' : ''}`}
+                                              title={`Filtrar por "${tag}"`}
+                                            >
+                                              <span className={`w-1 h-1 rounded-full ${chipStyle.dot}`} />
+                                              {tag}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'track', data: track }); }}
+                                        className="text-[10px] text-slate-400 hover:text-purple-300 flex items-center gap-1 mt-1"
+                                      >
+                                        <Tag className="w-2.5 h-2.5 text-slate-400" /> <span className="italic">Sem tags</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                  
+                                  <div className="flex gap-1.5 mt-auto pt-1 items-center">
+                                    {/* Botão de Trilha Principal com Modo Selecionado + Ações Rápidas */}
+                                    <div className="flex-1 flex items-center gap-1 min-w-0">
+                                      <button 
+                                        type="button"
+                                        onClick={() => playTrackWithTransition(track.id, audioTransitionMode)}
+                                        className={`flex-1 py-1 px-2 rounded text-[10px] font-bold transition-colors flex items-center justify-center gap-1 truncate
+                                          ${isPlayingTrack 
+                                            ? 'bg-purple-600 text-white shadow-sm' 
+                                            : isQueued 
+                                              ? 'bg-amber-600 text-white animate-pulse' 
+                                              : 'bg-slate-800/80 hover:bg-purple-950 text-purple-400'}`}
+                                        title={`Tocar trilha (${
+                                          audioTransitionMode === 'instant' ? 'Mudar Instantaneamente (Corte Seco)' :
+                                          audioTransitionMode === 'end' ? 'Mudar ao Final da Música Atual' : 'Transição Fade Suave na Hora'
+                                        })`}
+                                      >
+                                        {audioTransitionMode === 'instant' ? (
+                                          <Zap className="w-2.5 h-2.5 text-amber-300 fill-current shrink-0" />
+                                        ) : audioTransitionMode === 'end' ? (
+                                          <Clock className="w-2.5 h-2.5 text-indigo-300 shrink-0" />
+                                        ) : (
+                                          <Play className="w-2.5 h-2.5 fill-current shrink-0" />
+                                        )}
+                                        <span className="truncate">{isPlayingTrack ? 'Tocando' : isQueued ? 'Na Fila' : 'Trilha'}</span>
+                                      </button>
+
+                                      {/* Ações diretas de 1 clique para os 3 modos de transição */}
+                                      <div className="flex items-center gap-0.5 bg-slate-950/80 p-0.5 rounded border border-slate-800 shrink-0">
+                                        <button
+                                          type="button"
+                                          onClick={() => playTrackWithTransition(track.id, 'instant')}
+                                          title="Mudar Instantaneamente (Corte Seco agora)"
+                                          className="p-1 rounded text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition-colors"
+                                        >
+                                          <Zap className="w-2.5 h-2.5" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => playTrackWithTransition(track.id, 'fade')}
+                                          title="Transição Fade In/Out na hora (Crossfade)"
+                                          className="p-1 rounded text-slate-400 hover:text-purple-400 hover:bg-slate-800 transition-colors"
+                                        >
+                                          <RefreshCw className="w-2.5 h-2.5" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => playTrackWithTransition(track.id, 'end')}
+                                          title="Mudar ao final dessa música (Enfileirar)"
+                                          className="p-1 rounded text-slate-400 hover:text-indigo-400 hover:bg-slate-800 transition-colors"
+                                        >
+                                          <Clock className="w-2.5 h-2.5" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                    
+                                    <button 
+                                      type="button"
+                                      onClick={() => playAmbient(track.id)}
+                                      className={`px-2 py-1 rounded text-[10px] font-bold transition-colors flex items-center justify-center gap-1 shrink-0
+                                        ${isPlayingAmbient ? 'bg-emerald-600 text-white' : 'bg-slate-800/80 hover:bg-emerald-950 text-emerald-400'}`}
+                                    >
+                                      <Wind className="w-2.5 h-2.5" /> Ambiente
+                                    </button>
+                                  </div>
+
+                                  <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                    <button onClick={(e) => { e.stopPropagation(); setModalState({ isOpen: true, type: 'track', data: track }); }} title="Editar Áudio e Tags" className="p-1.5 bg-blue-900/90 text-white rounded hover:bg-blue-600 transition-colors">
+                                      <Pencil className="w-3 h-3" />
+                                    </button>
+                                    <button onClick={(e) => { e.stopPropagation(); deleteAsset('tracks', track.id); }} title="Excluir Áudio" className="p-1.5 bg-red-950 text-red-400 rounded hover:bg-red-600 hover:text-white transition-colors">
+                                      <Trash2 className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
 
                         <AudioTrackSeeker activeScene={activeScene} publishAudioOnly={publishAudioOnly} />
                       </section>

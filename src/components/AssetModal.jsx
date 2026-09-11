@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Save, Trash2, FileText, Dice5, Music, Radio, Play, Square, Volume2 } from 'lucide-react';
+import { X, Save, Trash2, FileText, Dice5, Music, Radio, Play, Square, Volume2, Tag, Plus } from 'lucide-react';
 import { useRPGStore } from '../store/useRPGStore';
 import { localDB, generateId, fileToDataUrl, getAssetUrl } from '../services/db';
+import { PRESET_AUDIO_TAGS, getAudioTagStyle } from '../utils/audioTags';
 
 export const AssetModal = () => {
   // Puxa as variáveis globais da Store do Zustand
@@ -22,6 +23,8 @@ export const AssetModal = () => {
   const [trackSourceType, setTrackSourceType] = useState('file'); // 'file' | 'stream'
   const [streamUrl, setStreamUrl] = useState('');
   const [isPlayingPreview, setIsPlayingPreview] = useState(false);
+  const [trackTags, setTrackTags] = useState([]);
+  const [customTagInput, setCustomTagInput] = useState('');
   const previewAudioRef = useRef(null);
 
   const stopPreview = () => {
@@ -81,6 +84,11 @@ export const AssetModal = () => {
         setTrackSourceType('file');
         setStreamUrl('');
       }
+      setTrackTags(modalState.data?.tags || []);
+      setCustomTagInput('');
+    } else {
+      setTrackTags([]);
+      setCustomTagInput('');
     }
   }, [modalState]);
 
@@ -125,7 +133,9 @@ export const AssetModal = () => {
       }
       if (modalState.type === 'track') {
         const tagsInput = formData.get('tags') || '';
-        data.tags = tagsInput.split(',').map(t => t.trim()).filter(t => t.length > 0);
+        const fallbackTags = tagsInput.split(',').map(t => t.trim()).filter(t => t.length > 0);
+        // Prioriza as tags selecionadas interativamente pelo usuário
+        data.tags = trackTags.length > 0 ? trackTags : fallbackTags;
       }
       if (modalState.type === 'refuge') {
         const selectedLocationId = formData.get('locationId');
@@ -520,9 +530,115 @@ export const AssetModal = () => {
                   </div>
                 )}
 
-                <div className="flex flex-col gap-1 mt-2">
-                  <label className="text-xs text-slate-400 uppercase font-bold">Tags / Categorias (Separadas por vírgula)</label>
-                  <input name="tags" defaultValue={modalState.data?.tags?.join(', ')} className="bg-slate-950 border border-slate-700 rounded-lg p-3 text-white text-sm focus:border-purple-500" placeholder="Ex: Combate, Tranquila, Suspense, Ambiente" />
+                {/* SISTEMA VISUAL DE TAGS DINÂMICAS */}
+                <div className="flex flex-col gap-2 mt-2 bg-slate-950/80 p-3 rounded-xl border border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs text-slate-300 uppercase font-bold flex items-center gap-1.5">
+                      <Tag className="w-3.5 h-3.5 text-purple-400" />
+                      Tags de Clima & Emoção
+                    </label>
+                    <span className="text-[10px] text-slate-400">
+                      {trackTags.length} {trackTags.length === 1 ? 'tag' : 'tags'}
+                    </span>
+                  </div>
+
+                  {/* Tags Atuais da Faixa */}
+                  <div className="flex flex-wrap gap-1.5 min-h-[32px] p-2 bg-slate-900 rounded-lg border border-slate-800/80 items-center">
+                    {trackTags.length === 0 ? (
+                      <span className="text-[11px] text-slate-400 italic">Nenhuma tag atribuída. Escolha uma abaixo ou digite:</span>
+                    ) : (
+                      trackTags.map((tag, idx) => {
+                        const style = getAudioTagStyle(tag);
+                        return (
+                          <span
+                            key={idx}
+                            className={`text-xs px-2.5 py-0.5 rounded-full flex items-center gap-1.5 font-medium border ${style.bg} ${style.border} ${style.text}`}
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
+                            {tag}
+                            <button
+                              type="button"
+                              onClick={() => setTrackTags(prev => prev.filter((_, i) => i !== idx))}
+                              className="hover:text-white ml-0.5"
+                              title="Remover tag"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Input para adicionar Tag Personalizada */}
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={customTagInput}
+                      onChange={(e) => setCustomTagInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ',') {
+                          e.preventDefault();
+                          const val = customTagInput.trim().replace(/,/g, '');
+                          if (val && !trackTags.some(t => t.toLowerCase() === val.toLowerCase())) {
+                            setTrackTags(prev => [...prev, val]);
+                          }
+                          setCustomTagInput('');
+                        }
+                      }}
+                      className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-xs placeholder:text-slate-400 focus:border-purple-500"
+                      placeholder="Criar nova tag (ex: Épica, Suspense, Caverna) e pressione Enter..."
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const val = customTagInput.trim().replace(/,/g, '');
+                        if (val && !trackTags.some(t => t.toLowerCase() === val.toLowerCase())) {
+                          setTrackTags(prev => [...prev, val]);
+                        }
+                        setCustomTagInput('');
+                      }}
+                      className="bg-purple-600 hover:bg-purple-500 text-white text-xs px-3 py-1.5 rounded-lg font-bold flex items-center gap-1 shrink-0"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Adicionar
+                    </button>
+                  </div>
+
+                  {/* Tags Rápidas Sugeridas */}
+                  <div>
+                    <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block mb-1">
+                      Sugestões Rápidas:
+                    </span>
+                    <div className="flex flex-wrap gap-1">
+                      {PRESET_AUDIO_TAGS.map(preset => {
+                        const isSelected = trackTags.some(t => t.toLowerCase() === preset.name.toLowerCase());
+                        return (
+                          <button
+                            key={preset.name}
+                            type="button"
+                            onClick={() => {
+                              if (isSelected) {
+                                setTrackTags(prev => prev.filter(t => t.toLowerCase() !== preset.name.toLowerCase()));
+                              } else {
+                                setTrackTags(prev => [...prev, preset.name]);
+                              }
+                            }}
+                            className={`text-[10px] px-2 py-0.5 rounded-full border transition-all flex items-center gap-1 ${
+                              isSelected
+                                ? `${preset.bg} ${preset.border} ${preset.text} font-bold ring-1 ring-purple-400/50`
+                                : 'bg-slate-900/90 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-200'
+                            }`}
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? preset.dot : 'bg-slate-400'}`} />
+                            {preset.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Input hidden para manter compatibilidade com FormData */}
+                  <input type="hidden" name="tags" value={trackTags.join(', ')} />
                 </div>
               </>
             )}

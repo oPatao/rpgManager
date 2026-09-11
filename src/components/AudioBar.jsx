@@ -19,6 +19,8 @@ export const AudioBar = () => {
   const setQueuedTrackId = useRPGStore(state => state.setQueuedTrackId);
   const audioTransitionMode = useRPGStore(state => state.audioTransitionMode);
   const setAudioTransitionMode = useRPGStore(state => state.setAudioTransitionMode);
+  const audioTransitionDuration = useRPGStore(state => state.audioTransitionDuration) || 5;
+  const setAudioTransitionDuration = useRPGStore(state => state.setAudioTransitionDuration);
   const audioProgress = useRPGStore(state => state.audioProgress);
   const setUiState = useRPGStore(state => state.setUiState);
 
@@ -40,20 +42,20 @@ export const AudioBar = () => {
     if (queuedTrack) {
       publishScene({
         ...activeScene,
-        audio: { ...currentAudio, trackId: queuedTrack.id, transition: audioTransitionMode || 'fade', loop: true }
+        audio: { ...currentAudio, trackId: queuedTrack.id, transition: audioTransitionMode || 'fade', loop: true, playTimestamp: Date.now() }
       });
       setQueuedTrackId(null);
       return;
     }
     if (!currentAudio.trackId) {
-      publishScene({ ...activeScene, audio: { ...currentAudio, trackId: tracks[0].id, transition: audioTransitionMode || 'fade' } });
+      publishScene({ ...activeScene, audio: { ...currentAudio, trackId: tracks[0].id, transition: audioTransitionMode || 'fade', playTimestamp: Date.now() } });
       return;
     }
     const currentIndex = tracks.findIndex(t => t.id === currentAudio.trackId);
     const nextIndex = (currentIndex + 1) % tracks.length;
     publishScene({
       ...activeScene,
-      audio: { ...currentAudio, trackId: tracks[nextIndex].id, transition: audioTransitionMode || 'fade' }
+      audio: { ...currentAudio, trackId: tracks[nextIndex].id, transition: audioTransitionMode || 'fade', playTimestamp: Date.now() }
     });
   };
 
@@ -233,6 +235,16 @@ export const AudioBar = () => {
               className="w-16 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
             />
           </div>
+
+          <button
+            type="button"
+            onClick={() => setAudioTransitionDuration(audioTransitionDuration === 5 ? 10 : 5)}
+            className="hidden md:flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-900/80 border border-slate-700/80 text-purple-300 hover:text-purple-200 transition-colors ml-1"
+            title={`Tempo do Fade suave: ${audioTransitionDuration}s (Clique para alternar entre 5s e 10s)`}
+          >
+            <RefreshCw className="w-2.5 h-2.5 text-purple-400" />
+            <span>{audioTransitionDuration}s</span>
+          </button>
         </div>
 
         {/* Barra de Progresso Interativa */}
